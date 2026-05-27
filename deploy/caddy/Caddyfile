@@ -1,0 +1,49 @@
+controller.englishlisten.cn {
+	encode zstd gzip
+
+	handle /api-proxy/* {
+		uri strip_prefix /api-proxy
+		reverse_proxy controller:8080
+	}
+
+	handle /api/* {
+		reverse_proxy controller:8080
+	}
+
+	handle /admin/* {
+		reverse_proxy controller:8080
+	}
+
+	handle /healthz {
+		reverse_proxy controller:8080
+	}
+
+	handle /readyz {
+		reverse_proxy controller:8080
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+}
+
+:80 {
+	encode zstd gzip
+
+	handle /api-proxy/* {
+		uri strip_prefix /api-proxy
+		reverse_proxy controller:8080
+	}
+
+	handle /api/* {
+		reverse_proxy controller:8080
+	}
+
+	handle /admin/* {
+		reverse_proxy controller:8080
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+}

@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sdwan
+      POSTGRES_USER: sdwan
+      POSTGRES_PASSWORD: sdwan
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sdwan -d sdwan"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  controller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://sdwan:sdwan@postgres:5432/sdwan?sslmode=disable
+      CONTROLLER_URL: https://controller.englishlisten.cn
+      LISTEN_ADDR: :8080
+      DEFAULT_CUSTOMER_MAX_DEVICES: "16"
+      POLL_INTERVAL_SECONDS: "15"
+      MIN_SUPPORTED_CLIENT_VERSION: v1.1.0
+      LATEST_CLIENT_VERSION: v1.1.0
+      STUN_SERVERS: stun:controller.englishlisten.cn:3478
+    ports:
+      - "18080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  stun:
+    image: coturn/coturn:4.6-alpine
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    ports:
+      - "3478:3478/udp"
+    volumes:
+      - ./deploy/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:18080
+    ports:
+      - "8081:80"
+    depends_on:
+      - controller
+
+volumes:
+  postgres_data:

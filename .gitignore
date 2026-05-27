@@ -1,0 +1,6 @@
+.env
+*.log
+tmp/
+build/
+web/node_modules/
+web/dist/

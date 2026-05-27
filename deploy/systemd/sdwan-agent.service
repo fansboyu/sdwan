@@ -1,0 +1,14 @@
+[Unit]
+Description=SD-WAN Linux Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sdwan-agent daemon --config /etc/sdwan/agent.json --wg-config /etc/wireguard/sdwan0.conf
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

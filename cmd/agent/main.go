@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"englishlisten/sdwan/internal/agent"
 	"englishlisten/sdwan/internal/version"
@@ -30,6 +32,8 @@ func main() {
 		err = runRender(ctx, os.Args[2:])
 	case "up":
 		err = runUp(ctx, os.Args[2:])
+	case "daemon":
+		err = runDaemon(os.Args[2:])
 	case "version":
 		fmt.Println(version.Version)
 	default:
@@ -40,6 +44,27 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+func runDaemon(args []string) error {
+	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
+	configPath := fs.String("config", agent.DefaultConfigPath, "agent config path")
+	wgPath := fs.String("wg-config", "/etc/wireguard/sdwan0.conf", "wireguard config output path")
+	apply := fs.Bool("apply", true, "apply wireguard config with wg-quick")
+	once := fs.Bool("once", false, "run one daemon iteration and exit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return agent.RunDaemon(ctx, agent.DaemonOptions{
+		ConfigPath: *configPath,
+		WGPath:     *wgPath,
+		Apply:      *apply,
+		Once:       *once,
+	})
 }
 
 func runRegister(ctx context.Context, args []string) error {
@@ -227,6 +252,7 @@ Usage:
   sdwan-agent netmap
   sdwan-agent render --out /tmp/sdwan0.conf
   sudo sdwan-agent up
+  sudo sdwan-agent daemon
   sdwan-agent version
 
 Linux dependencies for network apply:

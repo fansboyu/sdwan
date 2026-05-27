@@ -311,6 +311,39 @@ sudo ./sdwan-agent render --out /tmp/sdwan0.conf
 cat /tmp/sdwan0.conf
 ```
 
+运行 daemon 单次循环，便于调试：
+
+```bash
+sudo ./sdwan-agent daemon --once --apply=false
+```
+
+作为 systemd 服务运行：
+
+```bash
+sudo cp deploy/systemd/sdwan-agent.service /etc/systemd/system/sdwan-agent.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now sdwan-agent
+```
+
+查看日志：
+
+```bash
+journalctl -u sdwan-agent -f
+```
+
+daemon 主循环：
+
+```text
+加载 /etc/sdwan/agent.json
+自动检测 LAN/STUN endpoints
+调用 /api/v1/devices/poll
+netmap_changed=true 时拉取 /api/v1/netmap
+渲染 /etc/wireguard/sdwan0.conf
+执行 wg-quick down/up
+更新本地 netmap_version
+等待 poll_interval_seconds 后进入下一轮
+```
+
 ## 验证命令
 
 ```bash

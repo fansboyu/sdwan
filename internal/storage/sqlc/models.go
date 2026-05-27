@@ -2,47 +2,49 @@ package sqlc
 
 import "time"
 
-type Customer struct {
+type User struct {
 	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	AddressCidr   string    `json:"address_cidr"`
+	Email         string    `json:"email"`
+	PasswordHash  string    `json:"-"`
+	PlanCode      string    `json:"plan_code"`
+	OverlayCidr   string    `json:"overlay_cidr"`
 	MaxDevices    int32     `json:"max_devices"`
 	NetmapVersion int64     `json:"netmap_version"`
 	Status        string    `json:"status"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
-type AdminUser struct {
-	ID           string    `json:"id"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	Status       string    `json:"status"`
-	CreatedAt    time.Time `json:"created_at"`
-}
-
 type AdminSession struct {
-	ID          string     `json:"id"`
-	AdminUserID string     `json:"admin_user_id"`
-	ExpiresAt   time.Time  `json:"expires_at"`
-	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID        string     `json:"id"`
+	UserID    string     `json:"user_id"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
-type JoinToken struct {
-	ID         string     `json:"id"`
-	CustomerID string     `json:"customer_id"`
-	TokenHash  string     `json:"-"`
-	Name       string     `json:"name"`
-	MaxUses    int32      `json:"max_uses"`
-	UsedCount  int32      `json:"used_count"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
+type Plan struct {
+	Code            string    `json:"code"`
+	Name            string    `json:"name"`
+	PriceCents      int32     `json:"price_cents"`
+	MaxDevices      int32     `json:"max_devices"`
+	EnableSubnet    bool      `json:"enable_subnet"`
+	EnableSelfRelay bool      `json:"enable_self_relay"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type Subscription struct {
+	ID        string     `json:"id"`
+	UserID    string     `json:"user_id"`
+	PlanCode  string     `json:"plan_code"`
+	Status    string     `json:"status"`
+	StartsAt  time.Time  `json:"starts_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type Device struct {
 	ID            string     `json:"id"`
-	CustomerID    string     `json:"customer_id"`
+	UserID        string     `json:"user_id"`
 	Hostname      string     `json:"hostname"`
 	OS            string     `json:"os"`
 	Arch          string     `json:"arch"`
@@ -63,4 +65,28 @@ type DeviceEndpoint struct {
 	Source       string    `json:"source"`
 	RttMs        *int32    `json:"rtt_ms,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type SubnetRoute struct {
+	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`
+	DeviceID   string    `json:"device_id"`
+	Cidr       string    `json:"cidr"`
+	Status     string    `json:"status"`
+	Advertised bool      `json:"advertised"`
+	Approved   bool      `json:"approved"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type Relay struct {
+	ID           string     `json:"id"`
+	UserID       string     `json:"user_id"`
+	Name         string     `json:"name"`
+	PublicKey    string     `json:"public_key"`
+	Endpoint     string     `json:"endpoint"`
+	STUNEndpoint string     `json:"stun_endpoint"`
+	Status       string     `json:"status"`
+	LastSeenAt   *time.Time `json:"last_seen_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
 }

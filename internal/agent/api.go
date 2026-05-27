@@ -11,21 +11,19 @@ import (
 )
 
 type APIClient struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL string
+	client  *http.Client
 }
 
 func NewAPIClient(baseURL string) *APIClient {
 	return &APIClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
-		httpClient: &http.Client{
-			Timeout: 20 * time.Second,
-		},
+		client:  &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
 type RegisterRequest struct {
-	JoinToken     string `json:"join_token"`
+	AdminToken    string `json:"admin_token"`
 	Hostname      string `json:"hostname"`
 	OS            string `json:"os"`
 	Arch          string `json:"arch"`
@@ -40,14 +38,6 @@ type RegisterResponse struct {
 	VirtualIP     string `json:"virtual_ip"`
 	ControlURL    string `json:"control_url"`
 	NetmapVersion int64  `json:"netmap_version"`
-}
-
-func (c *APIClient) Register(ctx context.Context, req RegisterRequest) (RegisterResponse, error) {
-	var resp RegisterResponse
-	if err := c.postJSON(ctx, "/api/v1/devices/register", "", req, &resp); err != nil {
-		return RegisterResponse{}, err
-	}
-	return resp, nil
 }
 
 type EndpointReport struct {
@@ -70,28 +60,13 @@ type PollResponse struct {
 	NetmapVersion       int64     `json:"netmap_version"`
 	NetmapChanged       bool      `json:"netmap_changed"`
 	PollIntervalSeconds int       `json:"poll_interval_seconds"`
-	Upgrade             struct {
-		Required      bool   `json:"required"`
-		Recommended   bool   `json:"recommended"`
-		LatestVersion string `json:"latest_version"`
-		Message       string `json:"message"`
-	} `json:"upgrade"`
-}
-
-func (c *APIClient) Poll(ctx context.Context, token string, req PollRequest) (PollResponse, error) {
-	var resp PollResponse
-	if err := c.postJSON(ctx, "/api/v1/devices/poll", token, req, &resp); err != nil {
-		return PollResponse{}, err
-	}
-	return resp, nil
 }
 
 type Netmap struct {
-	Version     int64         `json:"version"`
-	Self        NetmapSelf    `json:"self"`
-	Peers       []NetmapPeer  `json:"peers"`
-	STUNServers []string      `json:"stun_servers"`
-	Relays      []interface{} `json:"relays"`
+	Version     int64        `json:"version"`
+	Self        NetmapSelf   `json:"self"`
+	Peers       []NetmapPeer `json:"peers"`
+	STUNServers []string     `json:"stun_servers"`
 }
 
 type NetmapSelf struct {
@@ -111,54 +86,57 @@ type NetmapPeer struct {
 	PersistentKeepalive int      `json:"persistent_keepalive"`
 }
 
-func (c *APIClient) Netmap(ctx context.Context, token string) (Netmap, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/netmap", nil)
-	if err != nil {
-		return Netmap{}, err
-	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return Netmap{}, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode >= 300 {
-		return Netmap{}, fmt.Errorf("controller returned %s", response.Status)
-	}
-	var netmap Netmap
-	if err := json.NewDecoder(response.Body).Decode(&netmap); err != nil {
-		return Netmap{}, err
-	}
-	return netmap, nil
+func (c *APIClient) Register(ctx context.Context, req RegisterRequest) (RegisterResponse, error) {
+	var resp RegisterResponse
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/devices/register", "", req, &resp)
+	return resp, err
 }
 
-func (c *APIClient) postJSON(ctx context.Context, path, token string, input any, output any) error {
-	body, err := json.Marshal(input)
+func (c *APIClient) Poll(ctx context.Context, token string, req PollRequest) (PollResponse, error) {
+	var resp PollResponse
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/devices/poll", token, req, &resp)
+	return resp, err
+}
+
+func (c *APIClient) Netmap(ctx context.Context, token string) (Netmap, error) {
+	var resp Netmap
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/netmap", token, nil, &resp)
+	return resp, err
+}
+
+func (c *APIClient) doJSON(ctx context.Context, method, path, token string, body any, target any) error {
+	var reader *bytes.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		reader = bytes.NewReader(data)
+	} else {
+		reader = bytes.NewReader(nil)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
-		request.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	response, err := c.httpClient.Do(request)
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
-	if response.StatusCode >= 300 {
-		var payload struct {
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var errPayload struct {
 			Error string `json:"error"`
 		}
-		_ = json.NewDecoder(response.Body).Decode(&payload)
-		if payload.Error != "" {
-			return fmt.Errorf("controller returned %s: %s", response.Status, payload.Error)
+		_ = json.NewDecoder(resp.Body).Decode(&errPayload)
+		if errPayload.Error == "" {
+			errPayload.Error = resp.Status
 		}
-		return fmt.Errorf("controller returned %s", response.Status)
+		return fmt.Errorf("%s", errPayload.Error)
 	}
-	return json.NewDecoder(response.Body).Decode(output)
+	return json.NewDecoder(resp.Body).Decode(target)
 }

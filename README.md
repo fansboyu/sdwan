@@ -1,8 +1,6 @@
 # SD-WAN Controller
 
-`sdwan` 是一个最小版 Tailscale-like 产品骨架。第一阶段聚焦软件控制面和客户端接入协议：管理员通过邮箱注册登录，创建客户后获得 Join Token；Linux/Windows 客户端使用 Join Token 注册，Controller 为客户端分配 Overlay 虚拟 IP，并通过 HTTP polling 下发 Netmap。
-
-当前版本：`v1.1.0`
+`sdwan` 是一个最小版 Tailscale-like 产品骨架。当前版本是 `v1.1.1`，目标是先跑通软件层面的闭环：账号注册、设备入网、虚拟 IP 分配、HTTP polling、Netmap 下发、Linux Agent 渲染 WireGuard 配置。
 
 默认控制器域名：
 
@@ -10,208 +8,141 @@
 controller.englishlisten.cn
 ```
 
-## 产品目标
+## 当前产品边界
 
-第一版目标是跑通最小闭环：
+第一版为了降低复杂度，取消“区域”概念。一个账号就是一个独立的 Overlay 网络：
 
-- 管理员只通过邮箱注册和登录。
-- 管理员创建客户。
-- 每个客户默认分配一个 `/28` Overlay 地址池，默认支持 16 个客户端。
-- 系统为客户生成 Join Token。
-- Linux/Windows 客户端使用 Join Token 注册。
-- Controller 为客户端分配虚拟 IP。
-- 客户端通过 HTTP polling 上报心跳、Endpoint 和版本信息。
-- 客户端拉取 Netmap，用于生成 WireGuard peer 配置。
-- 同一客户下默认全互通。
+- 用户只通过邮箱注册和登录。
+- 每个账号默认分配一个 `100.64.0.0/10` 下的独立 `/24` 地址池。
+- 默认每个账号最多 254 台设备，自动避开 `.0` 和 `.255`。
+- 登录后获得 `Admin Token`，它同时作为设备首次入网 Token。
+- 设备注册成功后获得独立 `Device Token`，后续 `poll` 和 `netmap` 使用 Device Token。
+- Controller 通过 HTTP polling 下发网络变更，暂不使用 WebSocket。
+- 同一账号下的设备默认全互通。
 
-第一版暂不做：
+暂不做：ACL、MagicDNS、Exit Node、真实支付、WebSocket 推送、多 Controller 高可用。
 
-- WebSocket 推送。
-- 复杂 ACL。
-- MagicDNS。
-- Exit Node。
-- Subnet Router。
-- Relay/DERP 转发。
-- 多 Controller 高可用。
-- 自动客户端升级。
-- 用户名、手机号、第三方 OAuth 登录。
-- 邮箱验证码和 SMTP 发信。
+## 服务等级
+
+当前只建模套餐能力，支付接口暂不接入：
+
+| code | 名称 | 价格 | 能力 |
+| --- | --- | --- | --- |
+| `free` | 基础组网 | 免费 | 基础设备组网 |
+| `subnet` | 快启子网服务 | 9.9 元/月 | 开启子网路由能力 |
+| `relay` | 自行搭建 Relay | 29.9 元/月 | 子网路由 + 自建 Relay 能力 |
 
 ## 技术路线
 
-后端控制器：
+- Controller：Go、`net/http`、PostgreSQL、`pgx/v5`
+- 查询层：sqlc 风格手写查询封装，后续可接入 `sqlc generate`
+- 数据库：PostgreSQL
+- 前端：Vue 3、Vite、原生 CSS，默认中文，可切换英文
+- Agent：Go，Linux 侧调用系统 WireGuard 工具链
+- STUN：`coturn/coturn:4.6.3`
+- 部署：Docker Compose
+- 反向代理：生产环境由服务器上独立 Caddy/Nginx 分流，本仓库不强制托管 Caddy
 
-- Go
-- 标准库 `net/http`
-- PostgreSQL
-- sqlc 风格查询层
-- `pgx/v5`
-- Token 明文只返回一次，数据库只保存 SHA-256 hash
-- Docker Compose 部署
-
-前端主控页面：
-
-- Vue 3
-- Vite
-- JavaScript
-- 原生 CSS
-- 默认中文展示，可切换英文
-- 构建后由 nginx 容器托管
-
-STUN：
-
-- coturn
-- STUN-only 模式
-- UDP 3478
-- 默认地址：`stun:controller.englishlisten.cn:3478`
-
-部署方式：
-
-- 本仓库只提供 Docker Compose。
-- 本仓库不内置 Caddy。
-- 生产环境由服务器上独立部署的 Caddy/Nginx 做服务分配。
-
-## 整体架构
+## 架构
 
 ```text
 Admin Web(Vue/nginx) ---> Controller(Go) ---> PostgreSQL
 
-Linux/Windows Client
+Linux/Windows Agent
       |
-      | HTTPS polling / netmap
+      | HTTPS register / polling / netmap
       v
 Controller
 
-Client <---- WireGuard P2P ----> Client
+Agent <---- WireGuard P2P ----> Agent
 ```
 
 本地 Docker Compose 暴露：
 
 ```text
-主控页面：http://localhost:8081
-Controller API：http://localhost:18080
-STUN：udp://localhost:3478
+Web:        http://localhost:8081
+Controller: http://localhost:18080
+STUN:       udp://localhost:3478
 ```
 
-生产时可以由你服务器上的独立 Caddy/Nginx 自行分流：
+生产建议分流：
 
 ```text
-https://controller.englishlisten.cn/        -> web:80
-https://controller.englishlisten.cn/api/*   -> controller:8080
-https://controller.englishlisten.cn/admin/* -> controller:8080
-udp://controller.englishlisten.cn:3478      -> stun:3478/udp
+https://controller.englishlisten.cn/        -> Web
+https://controller.englishlisten.cn/api/*   -> Controller
+https://controller.englishlisten.cn/admin/* -> Controller
+udp://controller.englishlisten.cn:3478      -> STUN
 ```
 
-## 地址分配
+## 数据库设计
 
-全局 Overlay 地址池：
+| 表 | 作用 |
+| --- | --- |
+| `users` | 用户账号、Overlay 地址池、套餐 code、设备上限、netmap 版本 |
+| `admin_sessions` | 登录会话，保存 Admin Token hash |
+| `plans` | 套餐定义 |
+| `subscriptions` | 用户套餐订阅，当前先预留 |
+| `devices` | 设备节点，直接归属用户 |
+| `device_endpoints` | 设备上报的 LAN/STUN endpoint |
+| `subnet_routes` | 快启子网服务预留表 |
+| `relays` | 自建 Relay 预留表 |
+| `audit_logs` | 操作日志预留表 |
 
-```text
-100.64.0.0/10
-```
-
-每个客户默认分配一个 `/28`：
-
-```text
-客户 A：100.64.0.0/28
-客户 B：100.64.0.16/28
-客户 C：100.64.0.32/28
-```
-
-每个客户默认容量：
+地址分配保护：
 
 ```text
-16 个客户端
-```
-
-设备按 `/32` 单地址分配。
-
-### 如何保证客户地址池不重复
-
-当前使用三层保护：
-
-```text
-1. 数据库唯一约束
-   customers.address_cidr UNIQUE
-
-2. 事务级分配锁
-   创建客户时使用 PostgreSQL pg_advisory_xact_lock。
-   同一时间只有一个事务能计算和写入新的客户地址池。
-
-3. 客户内设备唯一约束
-   devices(customer_id, virtual_ip) UNIQUE
-   防止同一客户内重复分配设备 IP。
-```
-
-客户地址池分配流程：
-
-```text
-开启数据库事务
-获取 PostgreSQL advisory transaction lock
-查询最后一个客户 CIDR
-向后偏移 16 个地址
-生成下一个 /28
-写入 customers
-写入 join_tokens
-提交事务
+1. users.overlay_cidr UNIQUE 保证账号地址池不重复
+2. 创建账号时使用 PostgreSQL pg_advisory_xact_lock 串行分配 /24
+3. devices(user_id, virtual_ip) UNIQUE 保证同账号下设备 IP 不重复
+4. 设备 IP 从 /24 内逐个分配，并跳过 .0 和 .255
 ```
 
 ## Token 模型
 
-系统使用三类 Token：
-
 ```text
 Admin Token:
-  管理员登录后获得。
-  用于访问 /admin/* 管理接口。
-  当前有效期为 30 天。
-
-Join Token:
-  客户级接入 Token。
-  用于客户端首次注册。
+  用户登录后获得。
+  用于访问 /admin/*。
+  同时作为设备首次注册时的入网 Token。
 
 Device Token:
-  设备级 Token。
-  注册成功后返回给客户端。
-  后续 poll 和 netmap 请求使用它鉴权。
+  设备注册成功后获得。
+  由 Agent 保存在 /etc/sdwan/agent.json。
+  后续 /api/v1/devices/poll 和 /api/v1/netmap 使用它鉴权。
 ```
 
-安全约束：
-
-- Token 明文只返回一次。
-- 数据库只保存 Token hash。
-- Controller 不保存客户端 WireGuard 私钥。
-- Controller 只保存客户端 WireGuard 公钥。
+Token 明文只返回一次，数据库只保存 SHA-256 hash。
 
 ## 本地运行
 
-启动：
-
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
 访问：
 
 ```text
-主控页面：http://localhost:8081
-Controller API：http://localhost:18080
+http://localhost:8081
 ```
 
 查看日志：
 
 ```bash
 docker compose logs -f controller
+docker compose logs -f web
 docker compose logs -f stun
 ```
 
-停止：
+如果从旧版 schema 升级，本地开发库需要重置：
 
 ```bash
-docker compose down
+docker compose stop controller
+docker exec sdwan-postgres-1 psql -U sdwan -d sdwan -v ON_ERROR_STOP=1 \
+  -c "DROP TABLE IF EXISTS audit_logs, relays, subnet_routes, device_endpoints, devices, subscriptions, plans, regions, admin_sessions, admin_users, users CASCADE;"
+docker compose up -d --build controller
 ```
 
-## API 接口
+## API
 
 ### 查询版本
 
@@ -219,7 +150,7 @@ docker compose down
 curl http://localhost:18080/api/v1/server/version
 ```
 
-### 管理员邮箱注册
+### 邮箱注册
 
 ```bash
 curl -X POST http://localhost:18080/admin/auth/register \
@@ -227,7 +158,7 @@ curl -X POST http://localhost:18080/admin/auth/register \
   -d '{"email":"admin@example.com","password":"password123"}'
 ```
 
-### 管理员邮箱登录
+### 邮箱登录
 
 ```bash
 curl -X POST http://localhost:18080/admin/auth/login \
@@ -235,31 +166,58 @@ curl -X POST http://localhost:18080/admin/auth/login \
   -d '{"email":"admin@example.com","password":"password123"}'
 ```
 
-### 创建客户
+### 当前账号
 
 ```bash
-curl -X POST http://localhost:18080/admin/customers \
-  -H "Authorization: Bearer sdwan_admin_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"demo"}'
+curl http://localhost:18080/admin/auth/me \
+  -H "Authorization: Bearer sdwan_admin_xxx"
 ```
 
-### 客户端注册设备
+### 控制台总览
+
+```bash
+curl http://localhost:18080/admin/account \
+  -H "Authorization: Bearer sdwan_admin_xxx"
+```
+
+返回账号地址池、设备数、套餐能力、套餐列表、子网路由预留数据、Relay 预留数据。
+
+### 套餐列表
+
+```bash
+curl http://localhost:18080/admin/plans
+```
+
+### 设备列表
+
+```bash
+curl http://localhost:18080/admin/devices \
+  -H "Authorization: Bearer sdwan_admin_xxx"
+```
+
+### 设备详情
+
+```bash
+curl http://localhost:18080/admin/devices/dev_xxx \
+  -H "Authorization: Bearer sdwan_admin_xxx"
+```
+
+### 设备注册
 
 ```bash
 curl -X POST http://localhost:18080/api/v1/devices/register \
   -H "Content-Type: application/json" \
   -d '{
-    "join_token": "sdwan_join_xxx",
+    "admin_token": "sdwan_admin_xxx",
     "hostname": "linux-01",
     "os": "linux",
     "arch": "amd64",
     "public_key": "wireguard-public-key",
-    "client_version": "v1.1.0"
+    "client_version": "v1.1.1"
   }'
 ```
 
-### 客户端 Polling
+### 设备 Polling
 
 ```bash
 curl -X POST http://localhost:18080/api/v1/devices/poll \
@@ -267,7 +225,7 @@ curl -X POST http://localhost:18080/api/v1/devices/poll \
   -H "Content-Type: application/json" \
   -d '{
     "current_netmap_version": 1,
-    "client_version": "v1.1.0",
+    "client_version": "v1.1.1",
     "endpoints": [
       {"type":"lan","addr":"192.168.1.10:41641","source":"local"}
     ]
@@ -281,90 +239,66 @@ curl http://localhost:18080/api/v1/netmap \
   -H "Authorization: Bearer sdwan_device_xxx"
 ```
 
-## Linux 客户端验证
+## Linux Agent
 
-构建 Linux Agent：
-
-```bash
-GOOS=linux GOARCH=amd64 go build -o sdwan-agent ./cmd/agent
-```
-
-Linux 依赖：
+安装脚本：
 
 ```bash
-sudo apt update
-sudo apt install -y wireguard-tools
+curl -fsSL https://controller.englishlisten.cn/install.sh | sudo sh
 ```
 
 注册设备：
 
 ```bash
-sudo ./sdwan-agent register \
-  --controller http://localhost:18080 \
-  --join-token sdwan_join_xxx
+sudo sdwan-agent register \
+  --controller https://controller.englishlisten.cn \
+  --admin-token sdwan_admin_xxx
 ```
 
-渲染 WireGuard 配置：
+启动 daemon：
 
 ```bash
-sudo ./sdwan-agent render --out /tmp/sdwan0.conf
-cat /tmp/sdwan0.conf
-```
-
-运行 daemon 单次循环，便于调试：
-
-```bash
-sudo ./sdwan-agent daemon --once --apply=false
-```
-
-作为 systemd 服务运行：
-
-```bash
-sudo cp deploy/systemd/sdwan-agent.service /etc/systemd/system/sdwan-agent.service
-sudo systemctl daemon-reload
 sudo systemctl enable --now sdwan-agent
 ```
 
-查看日志：
-
-```bash
-journalctl -u sdwan-agent -f
-```
-
-daemon 主循环：
+Agent 最终运行方式：
 
 ```text
-加载 /etc/sdwan/agent.json
-自动检测 LAN/STUN endpoints
-调用 /api/v1/devices/poll
-netmap_changed=true 时拉取 /api/v1/netmap
-渲染 /etc/wireguard/sdwan0.conf
-执行 wg-quick down/up
-更新本地 netmap_version
-等待 poll_interval_seconds 后进入下一轮
+1. 加载 /etc/sdwan/agent.json
+2. 检测 LAN/STUN endpoints
+3. 调用 /api/v1/devices/poll
+4. 如果 netmap_changed=true，拉取 /api/v1/netmap
+5. 渲染 /etc/wireguard/sdwan0.conf
+6. 执行 wg-quick down/up
+7. 更新本地 netmap_version
+8. 等待 poll_interval_seconds 后进入下一轮
 ```
 
-## 验证命令
+构建 Linux Agent 二进制：
+
+```bash
+docker run --rm \
+  -v /opt/sdwan:/src \
+  -w /src \
+  -e GOPROXY=https://goproxy.cn,direct \
+  golang:1.25-alpine \
+  sh -c 'GOOS=linux GOARCH=amd64 go build -o downloads/v1.1.1/sdwan-agent-linux-amd64 ./cmd/agent'
+```
+
+## 验证
 
 ```bash
 go test ./...
 
 cd web
 npm run build
-
-docker compose config
-docker compose build
 ```
 
-## 后续开发路线
+## 后续路线
 
-1. 主控页面拆分为 `api/`、`views/`、`components/`。
-2. 增加客户详情页。
-3. 增加设备列表页。
-4. 增加设备详情页，展示虚拟 IP、客户端版本、最后在线时间、Endpoint。
-5. 增加设备禁用/删除接口。
-6. Linux Agent 增加 daemon/systemd 模式。
-7. Linux Agent 增加自动 STUN Endpoint 探测。
-8. 增加 Windows Agent。
-9. 增加 Relay。
-10. 再考虑 WebSocket 推送替换 polling。
+1. 接入真实支付和套餐升级。
+2. 实现 `subnet_routes` 的审批、下发和 Agent 路由配置。
+3. 实现自建 Relay 注册、健康检查和 Netmap 下发。
+4. 增加设备禁用、删除、重命名。
+5. 增加 Windows Agent。
+6. 稳定后再考虑 WebSocket 推送替换 HTTP polling。

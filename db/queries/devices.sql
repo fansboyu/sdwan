@@ -1,30 +1,36 @@
 -- name: CreateDevice :one
 INSERT INTO devices (
-  id, customer_id, hostname, os, arch, public_key, virtual_ip,
+  id, user_id, hostname, os, arch, public_key, virtual_ip,
   device_token_hash, client_version, os_version
 ) VALUES (
   $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
-RETURNING id, customer_id, hostname, os, arch, public_key, host(virtual_ip),
+RETURNING id, user_id, hostname, os, arch, public_key, host(virtual_ip),
   status, client_version, os_version, last_seen_at, created_at;
 
 -- name: GetDeviceByTokenHash :one
-SELECT id, customer_id, hostname, os, arch, public_key, host(virtual_ip),
+SELECT id, user_id, hostname, os, arch, public_key, host(virtual_ip),
   status, client_version, os_version, last_seen_at, created_at
 FROM devices
 WHERE device_token_hash = $1;
 
--- name: ListDevicesByCustomer :many
-SELECT id, customer_id, hostname, os, arch, public_key, host(virtual_ip),
+-- name: GetDevice :one
+SELECT id, user_id, hostname, os, arch, public_key, host(virtual_ip),
   status, client_version, os_version, last_seen_at, created_at
 FROM devices
-WHERE customer_id = $1
+WHERE id = $1;
+
+-- name: ListDevicesByUser :many
+SELECT id, user_id, hostname, os, arch, public_key, host(virtual_ip),
+  status, client_version, os_version, last_seen_at, created_at
+FROM devices
+WHERE user_id = $1
 ORDER BY virtual_ip ASC;
 
--- name: CountActiveDevicesByCustomer :one
+-- name: CountActiveDevicesByUser :one
 SELECT count(*)::int
 FROM devices
-WHERE customer_id = $1 AND status = 'active';
+WHERE user_id = $1 AND status = 'active';
 
 -- name: UpdateDeviceHeartbeat :exec
 UPDATE devices
@@ -35,3 +41,9 @@ WHERE id = $1;
 UPDATE devices
 SET status = 'disabled'
 WHERE id = $1;
+
+-- name: ListEndpointsByDevice :many
+SELECT id, device_id, endpoint_type, address, source, rtt_ms, updated_at
+FROM device_endpoints
+WHERE device_id = $1
+ORDER BY updated_at DESC;

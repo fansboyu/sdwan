@@ -21,10 +21,10 @@ services:
       DATABASE_URL: postgres://sdwan:sdwan@postgres:5432/sdwan?sslmode=disable
       CONTROLLER_URL: https://controller.englishlisten.cn
       LISTEN_ADDR: :8080
-      DEFAULT_CUSTOMER_MAX_DEVICES: "16"
+      DEFAULT_MAX_DEVICES: "254"
       POLL_INTERVAL_SECONDS: "15"
-      MIN_SUPPORTED_CLIENT_VERSION: v1.1.0
-      LATEST_CLIENT_VERSION: v1.1.0
+      MIN_SUPPORTED_CLIENT_VERSION: v1.1.1
+      LATEST_CLIENT_VERSION: v1.1.1
       STUN_SERVERS: stun:controller.englishlisten.cn:3478
     ports:
       - "18080:8080"

@@ -16,7 +16,7 @@ type Config struct {
 	LogLevel                  slog.Level
 	Version                   string
 	ControllerURL             string
-	DefaultCustomerMaxDevices int32
+	DefaultMaxDevices         int32
 	DefaultPollInterval       time.Duration
 	MinSupportedClientVersion string
 	LatestClientVersion       string
@@ -30,10 +30,10 @@ func Load() Config {
 		LogLevel:                  parseLogLevel(getenv("LOG_LEVEL", "info")),
 		Version:                   version.Version,
 		ControllerURL:             getenv("CONTROLLER_URL", "https://controller.englishlisten.cn"),
-		DefaultCustomerMaxDevices: int32(getenvInt("DEFAULT_CUSTOMER_MAX_DEVICES", 16)),
+		DefaultMaxDevices:         int32(getenvInt("DEFAULT_MAX_DEVICES", 254)),
 		DefaultPollInterval:       time.Duration(getenvInt("POLL_INTERVAL_SECONDS", 15)) * time.Second,
-		MinSupportedClientVersion: getenv("MIN_SUPPORTED_CLIENT_VERSION", "v1.1.0"),
-		LatestClientVersion:       getenv("LATEST_CLIENT_VERSION", "v1.1.0"),
+		MinSupportedClientVersion: getenv("MIN_SUPPORTED_CLIENT_VERSION", "v1.1.1"),
+		LatestClientVersion:       getenv("LATEST_CLIENT_VERSION", "v1.1.1"),
 		STUNServers:               getenvList("STUN_SERVERS", []string{"stun:controller.englishlisten.cn:3478"}),
 	}
 }

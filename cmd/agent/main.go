@@ -71,14 +71,14 @@ func runRegister(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("register", flag.ExitOnError)
 	configPath := fs.String("config", agent.DefaultConfigPath, "agent config path")
 	controllerURL := fs.String("controller", "https://controller.englishlisten.cn", "controller URL")
-	joinToken := fs.String("join-token", "", "customer join token")
+	adminToken := fs.String("admin-token", "", "admin token used for first-time device registration")
 	hostname := fs.String("hostname", agent.DefaultHostname(), "device hostname")
 	listenPort := fs.Int("listen-port", agent.DefaultListenPort, "wireguard listen port")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *joinToken == "" {
-		return fmt.Errorf("--join-token is required")
+	if *adminToken == "" {
+		return fmt.Errorf("--admin-token is required")
 	}
 	privateKey, publicKey, err := agent.GenerateKeyPair()
 	if err != nil {
@@ -86,7 +86,7 @@ func runRegister(ctx context.Context, args []string) error {
 	}
 	client := agent.NewAPIClient(*controllerURL)
 	resp, err := client.Register(ctx, agent.RegisterRequest{
-		JoinToken:     *joinToken,
+		AdminToken:    *adminToken,
 		Hostname:      *hostname,
 		OS:            agent.DefaultOS(),
 		Arch:          agent.DefaultArch(),
@@ -247,7 +247,7 @@ func usage() {
 	fmt.Print(`sdwan-agent ` + version.Version + `
 
 Usage:
-  sdwan-agent register --controller http://localhost --join-token TOKEN
+  sdwan-agent register --controller http://localhost --admin-token ADMIN_TOKEN
   sdwan-agent poll
   sdwan-agent netmap
   sdwan-agent render --out /tmp/sdwan0.conf

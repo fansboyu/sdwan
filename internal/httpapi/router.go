@@ -34,8 +34,10 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /admin/auth/register", r.registerAdmin)
 	r.mux.HandleFunc("POST /admin/auth/login", r.loginAdmin)
 	r.mux.HandleFunc("GET /admin/auth/me", r.me)
-	r.mux.HandleFunc("POST /admin/customers", r.createCustomer)
-	r.mux.HandleFunc("GET /admin/customers", r.listCustomers)
+	r.mux.HandleFunc("GET /admin/account", r.account)
+	r.mux.HandleFunc("GET /admin/plans", r.plans)
+	r.mux.HandleFunc("GET /admin/devices", r.listDevices)
+	r.mux.HandleFunc("GET /admin/devices/{deviceID}", r.getDeviceDetail)
 
 	r.mux.HandleFunc("POST /api/v1/devices/register", r.registerDevice)
 	r.mux.HandleFunc("POST /api/v1/devices/poll", r.poll)
@@ -92,11 +94,12 @@ func (r *Router) me(w http.ResponseWriter, req *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"admin_user": user})
+	writeJSON(w, http.StatusOK, map[string]any{"user": user, "admin_user": user})
 }
 
-func (r *Router) createCustomer(w http.ResponseWriter, req *http.Request) {
-	if _, err := r.svc.AdminFromToken(req.Context(), req.Header.Get("Authorization")); err != nil {
+func (r *Router) account(w http.ResponseWriter, req *http.Request) {
+	user, err := r.svc.AdminFromToken(req.Context(), req.Header.Get("Authorization"))
+	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, app.ErrUnauthorized) {
 			status = http.StatusUnauthorized
@@ -104,21 +107,26 @@ func (r *Router) createCustomer(w http.ResponseWriter, req *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-	var body app.CreateCustomerRequest
-	if err := readJSON(req, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	resp, err := r.svc.CreateCustomer(req.Context(), body)
+	summary, err := r.svc.AccountSummary(req.Context(), user)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, resp)
+	writeJSON(w, http.StatusOK, summary)
 }
 
-func (r *Router) listCustomers(w http.ResponseWriter, req *http.Request) {
-	if _, err := r.svc.AdminFromToken(req.Context(), req.Header.Get("Authorization")); err != nil {
+func (r *Router) plans(w http.ResponseWriter, req *http.Request) {
+	plans, err := r.svc.ListPlans(req.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"plans": plans})
+}
+
+func (r *Router) listDevices(w http.ResponseWriter, req *http.Request) {
+	user, err := r.svc.AdminFromToken(req.Context(), req.Header.Get("Authorization"))
+	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, app.ErrUnauthorized) {
 			status = http.StatusUnauthorized
@@ -126,12 +134,34 @@ func (r *Router) listCustomers(w http.ResponseWriter, req *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-	customers, err := r.svc.ListCustomers(req.Context())
+	devices, err := r.svc.ListDevices(req.Context(), user)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"customers": customers})
+	writeJSON(w, http.StatusOK, map[string]any{"devices": devices})
+}
+
+func (r *Router) getDeviceDetail(w http.ResponseWriter, req *http.Request) {
+	user, err := r.svc.AdminFromToken(req.Context(), req.Header.Get("Authorization"))
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, app.ErrUnauthorized) {
+			status = http.StatusUnauthorized
+		}
+		writeError(w, status, err)
+		return
+	}
+	detail, err := r.svc.GetDeviceDetail(req.Context(), user, req.PathValue("deviceID"))
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, app.ErrUnauthorized) {
+			status = http.StatusUnauthorized
+		}
+		writeError(w, status, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (r *Router) registerDevice(w http.ResponseWriter, req *http.Request) {
@@ -145,6 +175,8 @@ func (r *Router) registerDevice(w http.ResponseWriter, req *http.Request) {
 		status := http.StatusBadRequest
 		if errors.Is(err, app.ErrUnauthorized) {
 			status = http.StatusUnauthorized
+		} else if errors.Is(err, app.ErrUpgradeRequired) {
+			status = http.StatusPaymentRequired
 		}
 		writeError(w, status, err)
 		return

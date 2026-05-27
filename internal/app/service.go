@@ -22,11 +22,13 @@ import (
 )
 
 const (
-	customerCIDRPrefix = 28
-	globalBaseCIDR     = "100.64.0.0/10"
+	userCIDRPrefix = 24
+	globalBaseCIDR = "100.64.0.0/10"
+	maxNodeLimit   = 254
 )
 
 var ErrUnauthorized = errors.New("unauthorized")
+var ErrUpgradeRequired = errors.New("upgrade required")
 
 type Service struct {
 	store *storage.Store
@@ -43,9 +45,10 @@ type AuthRequest struct {
 }
 
 type AuthResponse struct {
-	AdminUser sqlc.AdminUser `json:"admin_user"`
-	Token     string         `json:"token"`
-	ExpiresAt time.Time      `json:"expires_at"`
+	User      sqlc.User `json:"user"`
+	AdminUser sqlc.User `json:"admin_user"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 func (s *Service) RegisterAdmin(ctx context.Context, req AuthRequest) (AuthResponse, error) {
@@ -60,10 +63,23 @@ func (s *Service) RegisterAdmin(ctx context.Context, req AuthRequest) (AuthRespo
 	if err != nil {
 		return AuthResponse{}, err
 	}
-	user, err := s.store.Queries.CreateAdminUser(ctx, sqlc.CreateAdminUserParams{
-		ID:           "adm_" + ksuid.New().String(),
-		Email:        email,
-		PasswordHash: string(passwordHash),
+	var user sqlc.User
+	err = s.store.WithTx(ctx, func(q *sqlc.Queries) error {
+		if err := q.LockOverlayIPAllocator(ctx); err != nil {
+			return err
+		}
+		cidr, err := nextUserCIDR(ctx, q)
+		if err != nil {
+			return err
+		}
+		user, err = q.CreateUser(ctx, sqlc.CreateUserParams{
+			ID:           "usr_" + ksuid.New().String(),
+			Email:        email,
+			PasswordHash: string(passwordHash),
+			OverlayCidr:  cidr,
+			MaxDevices:   effectiveDeviceLimit(s.cfg.DefaultMaxDevices),
+		})
+		return err
 	})
 	if err != nil {
 		return AuthResponse{}, err
@@ -76,7 +92,7 @@ func (s *Service) LoginAdmin(ctx context.Context, req AuthRequest) (AuthResponse
 	if err != nil {
 		return AuthResponse{}, err
 	}
-	user, err := s.store.Queries.GetAdminUserByEmail(ctx, email)
+	user, err := s.store.Queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return AuthResponse{}, ErrUnauthorized
@@ -92,94 +108,89 @@ func (s *Service) LoginAdmin(ctx context.Context, req AuthRequest) (AuthResponse
 	return s.createAdminSession(ctx, user)
 }
 
-func (s *Service) AdminFromToken(ctx context.Context, bearer string) (sqlc.AdminUser, error) {
+func (s *Service) AdminFromToken(ctx context.Context, bearer string) (sqlc.User, error) {
 	token := strings.TrimPrefix(strings.TrimSpace(bearer), "Bearer ")
 	if token == "" {
-		return sqlc.AdminUser{}, ErrUnauthorized
+		return sqlc.User{}, ErrUnauthorized
 	}
-	user, err := s.store.Queries.GetAdminUserBySessionTokenHash(ctx, tokenHash(token))
+	user, err := s.store.Queries.GetUserBySessionTokenHash(ctx, tokenHash(token))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return sqlc.AdminUser{}, ErrUnauthorized
+			return sqlc.User{}, ErrUnauthorized
 		}
-		return sqlc.AdminUser{}, err
+		return sqlc.User{}, err
 	}
+	user.PasswordHash = ""
 	return user, nil
 }
 
-func (s *Service) createAdminSession(ctx context.Context, user sqlc.AdminUser) (AuthResponse, error) {
+func (s *Service) createAdminSession(ctx context.Context, user sqlc.User) (AuthResponse, error) {
 	token, err := randomToken("sdwan_admin")
 	if err != nil {
 		return AuthResponse{}, err
 	}
 	expiresAt := time.Now().Add(30 * 24 * time.Hour)
 	_, err = s.store.Queries.CreateAdminSession(ctx, sqlc.CreateAdminSessionParams{
-		ID:          "ases_" + ksuid.New().String(),
-		AdminUserID: user.ID,
-		TokenHash:   tokenHash(token),
-		ExpiresAt:   expiresAt,
+		ID:        "ases_" + ksuid.New().String(),
+		UserID:    user.ID,
+		TokenHash: tokenHash(token),
+		ExpiresAt: expiresAt,
 	})
 	if err != nil {
 		return AuthResponse{}, err
 	}
 	user.PasswordHash = ""
-	return AuthResponse{AdminUser: user, Token: token, ExpiresAt: expiresAt}, nil
+	return AuthResponse{User: user, AdminUser: user, Token: token, ExpiresAt: expiresAt}, nil
 }
 
-type CreateCustomerRequest struct {
-	Name string `json:"name"`
+type AccountSummary struct {
+	User         sqlc.User           `json:"user"`
+	DeviceCount  int32               `json:"device_count"`
+	Plans        []sqlc.Plan         `json:"plans"`
+	SubnetRoutes []sqlc.SubnetRoute  `json:"subnet_routes"`
+	Relays       []sqlc.Relay        `json:"relays"`
+	Capabilities AccountCapabilities `json:"capabilities"`
 }
 
-type CreateCustomerResponse struct {
-	Customer  sqlc.Customer `json:"customer"`
-	JoinToken string        `json:"join_token"`
+type AccountCapabilities struct {
+	EnableSubnet    bool `json:"enable_subnet"`
+	EnableSelfRelay bool `json:"enable_self_relay"`
 }
 
-func (s *Service) CreateCustomer(ctx context.Context, req CreateCustomerRequest) (CreateCustomerResponse, error) {
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		name = "default"
-	}
-	token, err := randomToken("sdwan_join")
+func (s *Service) AccountSummary(ctx context.Context, user sqlc.User) (AccountSummary, error) {
+	count, err := s.store.Queries.CountActiveDevicesByUser(ctx, user.ID)
 	if err != nil {
-		return CreateCustomerResponse{}, err
+		return AccountSummary{}, err
 	}
-	var customer sqlc.Customer
-	err = s.store.WithTx(ctx, func(q *sqlc.Queries) error {
-		if err := q.LockCustomerIPAllocator(ctx); err != nil {
-			return err
-		}
-		cidr, err := nextCustomerCIDR(ctx, q)
-		if err != nil {
-			return err
-		}
-		customer, err = q.CreateCustomer(ctx, sqlc.CreateCustomerParams{
-			ID:          "cus_" + ksuid.New().String(),
-			Name:        name,
-			AddressCidr: cidr,
-			MaxDevices:  s.cfg.DefaultCustomerMaxDevices,
-		})
-		if err != nil {
-			return err
-		}
-		_, err = q.CreateJoinToken(ctx, sqlc.CreateJoinTokenParams{
-			ID:         "jtok_" + ksuid.New().String(),
-			CustomerID: customer.ID,
-			TokenHash:  tokenHash(token),
-			Name:       "default",
-			MaxUses:    customer.MaxDevices,
-		})
-		return err
-	})
-	return CreateCustomerResponse{Customer: customer, JoinToken: token}, nil
+	plans, err := s.store.Queries.ListPlans(ctx)
+	if err != nil {
+		return AccountSummary{}, err
+	}
+	subnets, err := s.store.Queries.ListSubnetRoutesByUser(ctx, user.ID)
+	if err != nil {
+		return AccountSummary{}, err
+	}
+	relays, err := s.store.Queries.ListRelaysByUser(ctx, user.ID)
+	if err != nil {
+		return AccountSummary{}, err
+	}
+	user.PasswordHash = ""
+	return AccountSummary{
+		User:         user,
+		DeviceCount:  count,
+		Plans:        plans,
+		SubnetRoutes: subnets,
+		Relays:       relays,
+		Capabilities: capabilitiesForPlan(user.PlanCode),
+	}, nil
 }
 
-func (s *Service) ListCustomers(ctx context.Context) ([]sqlc.Customer, error) {
-	return s.store.Queries.ListCustomers(ctx)
+func (s *Service) ListPlans(ctx context.Context) ([]sqlc.Plan, error) {
+	return s.store.Queries.ListPlans(ctx)
 }
 
 type RegisterDeviceRequest struct {
-	JoinToken     string `json:"join_token"`
+	AdminToken    string `json:"admin_token"`
 	Hostname      string `json:"hostname"`
 	OS            string `json:"os"`
 	Arch          string `json:"arch"`
@@ -197,36 +208,23 @@ type RegisterDeviceResponse struct {
 }
 
 func (s *Service) RegisterDevice(ctx context.Context, req RegisterDeviceRequest) (RegisterDeviceResponse, error) {
-	joinToken, err := s.store.Queries.GetJoinTokenByHash(ctx, tokenHash(req.JoinToken))
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return RegisterDeviceResponse{}, ErrUnauthorized
-		}
-		return RegisterDeviceResponse{}, err
-	}
-	if joinToken.RevokedAt != nil || (joinToken.ExpiresAt != nil && joinToken.ExpiresAt.Before(time.Now())) {
-		return RegisterDeviceResponse{}, ErrUnauthorized
-	}
-	if joinToken.UsedCount >= joinToken.MaxUses {
-		return RegisterDeviceResponse{}, errors.New("join token usage limit reached")
-	}
-
-	customer, err := s.store.Queries.GetCustomer(ctx, joinToken.CustomerID)
+	user, err := s.AdminFromToken(ctx, req.AdminToken)
 	if err != nil {
 		return RegisterDeviceResponse{}, err
 	}
-	count, err := s.store.Queries.CountActiveDevicesByCustomer(ctx, customer.ID)
+	count, err := s.store.Queries.CountActiveDevicesByUser(ctx, user.ID)
 	if err != nil {
 		return RegisterDeviceResponse{}, err
 	}
-	if count >= customer.MaxDevices {
-		return RegisterDeviceResponse{}, errors.New("customer device limit reached")
+	maxDevices := effectiveDeviceLimit(user.MaxDevices)
+	if count >= maxDevices {
+		return RegisterDeviceResponse{}, ErrUpgradeRequired
 	}
-	devices, err := s.store.Queries.ListDevicesByCustomer(ctx, customer.ID)
+	devices, err := s.store.Queries.ListDevicesByUser(ctx, user.ID)
 	if err != nil {
 		return RegisterDeviceResponse{}, err
 	}
-	virtualIP, err := allocateDeviceIP(customer.AddressCidr, devices)
+	virtualIP, err := allocateDeviceIP(user.OverlayCidr, devices)
 	if err != nil {
 		return RegisterDeviceResponse{}, err
 	}
@@ -236,7 +234,7 @@ func (s *Service) RegisterDevice(ctx context.Context, req RegisterDeviceRequest)
 	}
 	device, err := s.store.Queries.CreateDevice(ctx, sqlc.CreateDeviceParams{
 		ID:              "dev_" + ksuid.New().String(),
-		CustomerID:      customer.ID,
+		UserID:          user.ID,
 		Hostname:        defaultString(req.Hostname, "unnamed"),
 		OS:              defaultString(req.OS, "unknown"),
 		Arch:            req.Arch,
@@ -249,20 +247,43 @@ func (s *Service) RegisterDevice(ctx context.Context, req RegisterDeviceRequest)
 	if err != nil {
 		return RegisterDeviceResponse{}, err
 	}
-	if err := s.store.Queries.IncrementJoinTokenUse(ctx, joinToken.ID); err != nil {
+	if err := s.store.Queries.BumpNetmapVersion(ctx, user.ID); err != nil {
 		return RegisterDeviceResponse{}, err
 	}
-	if err := s.store.Queries.BumpNetmapVersion(ctx, customer.ID); err != nil {
-		return RegisterDeviceResponse{}, err
-	}
-	customer, _ = s.store.Queries.GetCustomer(ctx, customer.ID)
+	user, _ = s.store.Queries.GetUser(ctx, user.ID)
 	return RegisterDeviceResponse{
 		DeviceID:      device.ID,
 		DeviceToken:   deviceToken,
 		VirtualIP:     device.VirtualIP,
 		ControlURL:    s.cfg.ControllerURL,
-		NetmapVersion: customer.NetmapVersion,
+		NetmapVersion: user.NetmapVersion,
 	}, nil
+}
+
+type DeviceDetail struct {
+	Device    sqlc.Device           `json:"device"`
+	User      sqlc.User             `json:"user"`
+	Endpoints []sqlc.DeviceEndpoint `json:"endpoints"`
+}
+
+func (s *Service) ListDevices(ctx context.Context, user sqlc.User) ([]sqlc.Device, error) {
+	return s.store.Queries.ListDevicesByUser(ctx, user.ID)
+}
+
+func (s *Service) GetDeviceDetail(ctx context.Context, user sqlc.User, deviceID string) (DeviceDetail, error) {
+	device, err := s.store.Queries.GetDevice(ctx, deviceID)
+	if err != nil {
+		return DeviceDetail{}, err
+	}
+	if device.UserID != user.ID {
+		return DeviceDetail{}, ErrUnauthorized
+	}
+	endpoints, err := s.store.Queries.ListEndpointsByDevice(ctx, device.ID)
+	if err != nil {
+		return DeviceDetail{}, err
+	}
+	user.PasswordHash = ""
+	return DeviceDetail{Device: device, User: user, Endpoints: endpoints}, nil
 }
 
 type EndpointReport struct {
@@ -316,15 +337,15 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 			RttMs:        endpoint.RttMs,
 		})
 	}
-	customer, err := s.store.Queries.GetCustomer(ctx, device.CustomerID)
+	user, err := s.store.Queries.GetUser(ctx, device.UserID)
 	if err != nil {
 		return PollResponse{}, err
 	}
 	return PollResponse{
 		ServerTime:          time.Now().UTC(),
 		DeviceStatus:        device.Status,
-		NetmapVersion:       customer.NetmapVersion,
-		NetmapChanged:       req.CurrentNetmapVersion != customer.NetmapVersion,
+		NetmapVersion:       user.NetmapVersion,
+		NetmapChanged:       req.CurrentNetmapVersion != user.NetmapVersion,
 		PollIntervalSeconds: int(s.cfg.DefaultPollInterval.Seconds()),
 		Upgrade: UpgradeResponse{
 			Required:      false,
@@ -365,15 +386,15 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 	if err != nil {
 		return Netmap{}, err
 	}
-	customer, err := s.store.Queries.GetCustomer(ctx, self.CustomerID)
+	user, err := s.store.Queries.GetUser(ctx, self.UserID)
 	if err != nil {
 		return Netmap{}, err
 	}
-	devices, err := s.store.Queries.ListDevicesByCustomer(ctx, self.CustomerID)
+	devices, err := s.store.Queries.ListDevicesByUser(ctx, self.UserID)
 	if err != nil {
 		return Netmap{}, err
 	}
-	endpoints, err := s.store.Queries.ListEndpointsByCustomer(ctx, self.CustomerID)
+	endpoints, err := s.store.Queries.ListEndpointsByUser(ctx, self.UserID)
 	if err != nil {
 		return Netmap{}, err
 	}
@@ -400,7 +421,7 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 		})
 	}
 	return Netmap{
-		Version: customer.NetmapVersion,
+		Version: user.NetmapVersion,
 		Self: NetmapSelf{
 			DeviceID:  self.ID,
 			Hostname:  self.Hostname,
@@ -440,23 +461,29 @@ func (s *Service) deviceFromToken(ctx context.Context, bearer string) (sqlc.Devi
 	return device, nil
 }
 
-func nextCustomerCIDR(ctx context.Context, q *sqlc.Queries) (string, error) {
-	lastCIDR, err := q.GetLastCustomerCIDR(ctx)
+func nextUserCIDR(ctx context.Context, q *sqlc.Queries) (string, error) {
+	lastCIDR, err := q.GetLastUserCIDR(ctx)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return "", err
 	}
 	if errors.Is(err, pgx.ErrNoRows) || lastCIDR == "" {
-		return "100.64.0.0/28", nil
+		return "100.64.0.0/24", nil
 	}
 	prefix, err := netip.ParsePrefix(lastCIDR)
 	if err != nil {
 		return "", err
 	}
-	next := prefix.Addr().Next()
-	for i := 1; i < 16; i++ {
+	base, _ := netip.ParsePrefix(globalBaseCIDR)
+	step := 1 << (32 - userCIDRPrefix)
+	next := prefix.Addr()
+	for i := 0; i < step; i++ {
 		next = next.Next()
 	}
-	return netip.PrefixFrom(next, customerCIDRPrefix).String(), nil
+	nextPrefix := netip.PrefixFrom(next, userCIDRPrefix)
+	if !base.Contains(nextPrefix.Addr()) {
+		return "", errors.New("overlay cidr pool exhausted")
+	}
+	return nextPrefix.String(), nil
 }
 
 func allocateDeviceIP(cidr string, devices []sqlc.Device) (string, error) {
@@ -472,13 +499,39 @@ func allocateDeviceIP(cidr string, devices []sqlc.Device) (string, error) {
 		}
 	}
 	addr := prefix.Addr()
-	for i := 0; i < 16; i++ {
-		if prefix.Contains(addr) && !used[addr] {
+	for prefix.Contains(addr) {
+		if !isReservedDeviceIP(addr) && !used[addr] {
 			return addr.String(), nil
 		}
 		addr = addr.Next()
 	}
 	return "", errors.New("no available virtual ip")
+}
+
+func isReservedDeviceIP(addr netip.Addr) bool {
+	if !addr.Is4() {
+		return false
+	}
+	octets := addr.As4()
+	return octets[3] == 0 || octets[3] == 255
+}
+
+func effectiveDeviceLimit(limit int32) int32 {
+	if limit <= 0 || limit > maxNodeLimit {
+		return maxNodeLimit
+	}
+	return limit
+}
+
+func capabilitiesForPlan(code string) AccountCapabilities {
+	switch code {
+	case "relay":
+		return AccountCapabilities{EnableSubnet: true, EnableSelfRelay: true}
+	case "subnet":
+		return AccountCapabilities{EnableSubnet: true, EnableSelfRelay: false}
+	default:
+		return AccountCapabilities{EnableSubnet: false, EnableSelfRelay: false}
+	}
 }
 
 func tokenHash(token string) string {

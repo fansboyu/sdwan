@@ -4,15 +4,15 @@ import { onMounted, ref } from 'vue'
 const apiBase = import.meta.env.VITE_API_BASE_URL || ''
 const locale = ref(localStorage.getItem('locale') || 'zh')
 const adminToken = ref(localStorage.getItem('admin_token') || '')
-const adminUser = ref(null)
+const user = ref(null)
+const account = ref(null)
 const authMode = ref('login')
 const email = ref('')
 const password = ref('')
-const version = ref(null)
-const customers = ref([])
-const customerName = ref('')
-const createdToken = ref('')
+const devices = ref([])
+const selectedDevice = ref(null)
 const error = ref('')
+const showPlanModal = ref(false)
 
 const messages = {
   zh: {
@@ -25,20 +25,38 @@ const messages = {
     password: '密码',
     passwordHint: '至少 8 位',
     authFailed: '认证失败',
-    createTitle: '创建客户',
-    createDesc: '每个客户默认获得 16 个 Overlay 地址和一个客户端接入 Token。',
-    customerName: '客户名称',
-    create: '创建',
-    token: '接入 Token',
-    customers: '客户列表',
-    name: '名称',
+    accountTitle: '账号网络',
+    accountDesc: '第一版取消区域概念。每个账号默认获得一个 100.64.0.0/10 下的独立 /24 地址池，设备直接加入账号网络。',
+    enrollmentToken: '设备入网 Token',
+    tokenNote: '当前版本 Admin Token 同时作为设备首次入网 Token。设备注册成功后会获得独立 Device Token，后续轮询和网络视图不依赖 Admin Token。',
     addressPool: '地址池',
-    devices: '设备数',
+    plan: '当前套餐',
+    devices: '设备',
     netmap: '网络视图',
-    noCustomers: '暂无客户',
-    api: '接口',
+    capabilities: '能力',
+    subnetFeature: '快启子网服务',
+    relayFeature: '自行搭建 Relay',
+    enabled: '已开通',
+    disabled: '未开通',
+    upgrade: '查看升级',
+    planTitle: '服务等级',
+    planDesc: '支付接口暂时不接入，当前只展示套餐能力。',
+    monthly: '/月',
+    close: '关闭',
+    deviceList: '设备节点',
+    noDevices: '暂无设备',
+    deviceDetail: '设备详情',
+    hostname: '主机名',
+    virtualIP: '虚拟 IP',
+    os: '系统',
+    arch: '架构',
+    status: '状态',
+    clientVersion: '客户端版本',
+    lastSeen: '最后在线',
+    createdAt: '创建时间',
+    endpoints: 'Endpoint',
+    publicKey: 'WireGuard 公钥',
     switchLanguage: 'English',
-    createFailed: '创建客户失败',
   },
   en: {
     title: 'SD-WAN Controller',
@@ -50,20 +68,38 @@ const messages = {
     password: 'Password',
     passwordHint: 'At least 8 characters',
     authFailed: 'Authentication failed',
-    createTitle: 'Create Customer',
-    createDesc: 'Each customer receives a 16-address overlay pool and a client join token.',
-    customerName: 'Customer name',
-    create: 'Create',
-    token: 'Join Token',
-    customers: 'Customers',
-    name: 'Name',
+    accountTitle: 'Account Network',
+    accountDesc: 'The first release removes regions. Each account receives an isolated /24 pool under 100.64.0.0/10, and devices join the account network directly.',
+    enrollmentToken: 'Device Enrollment Token',
+    tokenNote: 'In this version, the Admin Token also works as the first-time device enrollment token. Registered devices receive an independent Device Token.',
     addressPool: 'Address Pool',
+    plan: 'Plan',
     devices: 'Devices',
     netmap: 'Netmap',
-    noCustomers: 'No customers yet',
-    api: 'API',
+    capabilities: 'Capabilities',
+    subnetFeature: 'Quick Subnet Service',
+    relayFeature: 'Self-hosted Relay',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
+    upgrade: 'View Plans',
+    planTitle: 'Service Levels',
+    planDesc: 'Payment is not connected yet. Plans are display-only for now.',
+    monthly: '/month',
+    close: 'Close',
+    deviceList: 'Device Nodes',
+    noDevices: 'No devices yet',
+    deviceDetail: 'Device Detail',
+    hostname: 'Hostname',
+    virtualIP: 'Virtual IP',
+    os: 'OS',
+    arch: 'Arch',
+    status: 'Status',
+    clientVersion: 'Client Version',
+    lastSeen: 'Last Seen',
+    createdAt: 'Created At',
+    endpoints: 'Endpoint',
+    publicKey: 'WireGuard Public Key',
     switchLanguage: '中文',
-    createFailed: 'Create customer failed',
   },
 }
 
@@ -80,9 +116,20 @@ function authHeaders() {
   return { Authorization: `Bearer ${adminToken.value}` }
 }
 
-async function loadVersion() {
-  const response = await fetch(`${apiBase}/api/v1/server/version`)
-  version.value = await response.json()
+function formatTime(value) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString()
+}
+
+function formatPrice(cents) {
+  if (!cents) return locale.value === 'zh' ? '免费' : 'Free'
+  return `￥${(cents / 100).toFixed(1)}`
+}
+
+async function readPayload(response) {
+  const text = await response.text()
+  if (!text) return {}
+  return JSON.parse(text)
 }
 
 async function loadMe() {
@@ -94,8 +141,23 @@ async function loadMe() {
     logout()
     return
   }
-  const payload = await response.json()
-  adminUser.value = payload.admin_user
+  const payload = await readPayload(response)
+  user.value = payload.user || payload.admin_user
+}
+
+async function loadDashboard() {
+  if (!adminToken.value) return
+  const [accountResp, devicesResp] = await Promise.all([
+    fetch(`${apiBase}/admin/account`, { headers: authHeaders() }),
+    fetch(`${apiBase}/admin/devices`, { headers: authHeaders() }),
+  ])
+  if (accountResp.status === 401 || devicesResp.status === 401) {
+    logout()
+    return
+  }
+  account.value = await readPayload(accountResp)
+  const devicePayload = await readPayload(devicesResp)
+  devices.value = devicePayload.devices || []
 }
 
 async function submitAuth() {
@@ -106,60 +168,41 @@ async function submitAuth() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: email.value, password: password.value }),
   })
-  const payload = await response.json()
+  const payload = await readPayload(response)
   if (!response.ok) {
     error.value = payload.error || t('authFailed')
     return
   }
   adminToken.value = payload.token
-  adminUser.value = payload.admin_user
+  user.value = payload.user || payload.admin_user
   localStorage.setItem('admin_token', payload.token)
   password.value = ''
-  await loadCustomers()
+  await loadDashboard()
 }
 
 function logout() {
   adminToken.value = ''
-  adminUser.value = null
-  customers.value = []
+  user.value = null
+  account.value = null
+  devices.value = []
+  selectedDevice.value = null
   localStorage.removeItem('admin_token')
 }
 
-async function loadCustomers() {
-  if (!adminToken.value) return
-  const response = await fetch(`${apiBase}/admin/customers`, {
+async function selectDevice(device) {
+  const response = await fetch(`${apiBase}/admin/devices/${device.id}`, {
     headers: authHeaders(),
   })
-  if (response.status === 401) {
-    logout()
-    return
-  }
-  const payload = await response.json()
-  customers.value = payload.customers || []
-}
-
-async function createCustomer() {
-  error.value = ''
-  createdToken.value = ''
-  const response = await fetch(`${apiBase}/admin/customers`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ name: customerName.value || 'default' }),
-  })
-  const payload = await response.json()
   if (!response.ok) {
-    error.value = payload.error || t('createFailed')
+    error.value = t('authFailed')
     return
   }
-  createdToken.value = payload.join_token
-  customerName.value = ''
-  await loadCustomers()
+  selectedDevice.value = await readPayload(response)
 }
 
 onMounted(async () => {
-  await loadVersion()
   await loadMe()
-  await loadCustomers()
+  await loadDashboard()
 })
 </script>
 
@@ -172,15 +215,11 @@ onMounted(async () => {
       </div>
       <div class="actions">
         <button class="ghost" type="button" @click="toggleLocale">{{ t('switchLanguage') }}</button>
-        <button class="ghost" v-if="adminUser" type="button" @click="logout">{{ t('logout') }}</button>
-        <div class="version" v-if="version">
-          <span>{{ version.server_version }}</span>
-          <small>{{ t('api') }} {{ version.api_version }}</small>
-        </div>
+        <button class="ghost" v-if="user" type="button" @click="logout">{{ t('logout') }}</button>
       </div>
     </section>
 
-    <section class="panel" v-if="!adminUser">
+    <section class="panel" v-if="!user">
       <div>
         <h2>{{ authMode === 'login' ? t('login') : t('register') }}</h2>
         <p>{{ t('emailOnly') }}</p>
@@ -209,43 +248,127 @@ onMounted(async () => {
 
     <template v-else>
       <section class="identity">
-        <span>{{ adminUser.email }}</span>
+        <span>{{ user.email }}</span>
       </section>
 
-      <section class="panel">
-        <div>
-          <h2>{{ t('createTitle') }}</h2>
-          <p>{{ t('createDesc') }}</p>
+      <section class="panel account-panel" v-if="account">
+        <div class="section-title">
+          <div>
+            <h2>{{ t('accountTitle') }}</h2>
+            <p>{{ t('accountDesc') }}</p>
+          </div>
+          <button type="button" @click="showPlanModal = true">{{ t('upgrade') }}</button>
         </div>
-        <form class="create" @submit.prevent="createCustomer">
-          <input v-model="customerName" :placeholder="t('customerName')" />
-          <button type="submit">{{ t('create') }}</button>
-        </form>
-        <p class="error" v-if="error">{{ error }}</p>
-        <div class="token" v-if="createdToken">
-          <strong>{{ t('token') }}</strong>
-          <code>{{ createdToken }}</code>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>{{ t('customers') }}</h2>
-        <div class="table">
-          <div class="row head">
-            <span>{{ t('name') }}</span>
+        <div class="metrics">
+          <div>
             <span>{{ t('addressPool') }}</span>
-            <span>{{ t('devices') }}</span>
-            <span>{{ t('netmap') }}</span>
+            <strong>{{ account.user.overlay_cidr }}</strong>
           </div>
-          <div class="empty" v-if="customers.length === 0">{{ t('noCustomers') }}</div>
-          <div class="row" v-for="customer in customers" :key="customer.id">
-            <span>{{ customer.name }}</span>
-            <span>{{ customer.address_cidr }}</span>
-            <span>{{ customer.max_devices }}</span>
-            <span>v{{ customer.netmap_version }}</span>
+          <div>
+            <span>{{ t('devices') }}</span>
+            <strong>{{ account.device_count }}/{{ account.user.max_devices }}</strong>
+          </div>
+          <div>
+            <span>{{ t('netmap') }}</span>
+            <strong>v{{ account.user.netmap_version }}</strong>
+          </div>
+          <div>
+            <span>{{ t('plan') }}</span>
+            <strong>{{ account.user.plan_code }}</strong>
           </div>
         </div>
+        <div class="capabilities">
+          <span>{{ t('capabilities') }}</span>
+          <strong>{{ t('subnetFeature') }}: {{ account.capabilities.enable_subnet ? t('enabled') : t('disabled') }}</strong>
+          <strong>{{ t('relayFeature') }}: {{ account.capabilities.enable_self_relay ? t('enabled') : t('disabled') }}</strong>
+        </div>
+        <div class="token">
+          <strong>{{ t('enrollmentToken') }}</strong>
+          <code>{{ adminToken }}</code>
+          <p>{{ t('tokenNote') }}</p>
+        </div>
+        <p class="error" v-if="error">{{ error }}</p>
       </section>
+
+      <section class="panel">
+        <div class="section-title">
+          <h2>{{ t('deviceList') }}</h2>
+          <span>{{ account?.user?.overlay_cidr }}</span>
+        </div>
+        <div class="table">
+          <div class="row head device-row">
+            <span>{{ t('hostname') }}</span>
+            <span>{{ t('virtualIP') }}</span>
+            <span>{{ t('status') }}</span>
+            <span>{{ t('lastSeen') }}</span>
+          </div>
+          <div class="empty" v-if="devices.length === 0">{{ t('noDevices') }}</div>
+          <button
+            class="row device-row clickable-row"
+            v-for="device in devices"
+            :key="device.id"
+            type="button"
+            @click="selectDevice(device)"
+          >
+            <span>{{ device.hostname }}</span>
+            <span>{{ device.virtual_ip }}</span>
+            <span>{{ device.status }}</span>
+            <span>{{ formatTime(device.last_seen_at) }}</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="panel detail" v-if="selectedDevice">
+        <h2>{{ t('deviceDetail') }}</h2>
+        <dl>
+          <dt>{{ t('hostname') }}</dt>
+          <dd>{{ selectedDevice.device.hostname }}</dd>
+          <dt>{{ t('virtualIP') }}</dt>
+          <dd>{{ selectedDevice.device.virtual_ip }}</dd>
+          <dt>{{ t('os') }}</dt>
+          <dd>{{ selectedDevice.device.os }}</dd>
+          <dt>{{ t('arch') }}</dt>
+          <dd>{{ selectedDevice.device.arch || '-' }}</dd>
+          <dt>{{ t('status') }}</dt>
+          <dd>{{ selectedDevice.device.status }}</dd>
+          <dt>{{ t('clientVersion') }}</dt>
+          <dd>{{ selectedDevice.device.client_version }}</dd>
+          <dt>{{ t('lastSeen') }}</dt>
+          <dd>{{ formatTime(selectedDevice.device.last_seen_at) }}</dd>
+          <dt>{{ t('createdAt') }}</dt>
+          <dd>{{ formatTime(selectedDevice.device.created_at) }}</dd>
+          <dt>{{ t('publicKey') }}</dt>
+          <dd><code>{{ selectedDevice.device.public_key }}</code></dd>
+        </dl>
+        <h3>{{ t('endpoints') }}</h3>
+        <div class="endpoint-list" v-if="selectedDevice.endpoints.length > 0">
+          <div class="endpoint" v-for="endpoint in selectedDevice.endpoints" :key="endpoint.id">
+            <span>{{ endpoint.endpoint_type }}</span>
+            <code>{{ endpoint.address }}</code>
+            <small>{{ endpoint.source }} · {{ formatTime(endpoint.updated_at) }}</small>
+          </div>
+        </div>
+        <div class="empty inline" v-else>-</div>
+      </section>
+
+      <div class="modal-backdrop" v-if="showPlanModal" @click.self="showPlanModal = false">
+        <section class="modal">
+          <div class="section-title">
+            <h2>{{ t('planTitle') }}</h2>
+            <button class="ghost" type="button" @click="showPlanModal = false">{{ t('close') }}</button>
+          </div>
+          <p>{{ t('planDesc') }}</p>
+          <div class="plans">
+            <article class="plan" v-for="plan in account?.plans || []" :key="plan.code">
+              <strong>{{ plan.name }}</strong>
+              <div class="price">{{ formatPrice(plan.price_cents) }} <span v-if="plan.price_cents">{{ t('monthly') }}</span></div>
+              <p>{{ t('devices') }}: {{ plan.max_devices }}</p>
+              <p>{{ t('subnetFeature') }}: {{ plan.enable_subnet ? t('enabled') : t('disabled') }}</p>
+              <p>{{ t('relayFeature') }}: {{ plan.enable_self_relay ? t('enabled') : t('disabled') }}</p>
+            </article>
+          </div>
+        </section>
+      </div>
     </template>
   </main>
 </template>

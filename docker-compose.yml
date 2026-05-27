@@ -33,7 +33,7 @@ services:
         condition: service_healthy
 
   stun:
-    image: coturn/coturn:4.6-alpine
+    image: coturn/coturn:4.6.3
     command: ["-c", "/etc/coturn/turnserver.conf"]
     ports:
       - "3478:3478/udp"

@@ -218,13 +218,24 @@ type UpsertDeviceEndpointParams struct {
 	RttMs        *int32
 }
 
-func (q *Queries) UpsertDeviceEndpoint(ctx context.Context, arg UpsertDeviceEndpointParams) error {
-	_, err := q.db.Exec(ctx, `INSERT INTO device_endpoints (id, device_id, endpoint_type, address, source, rtt_ms, updated_at)
+func (q *Queries) UpsertDeviceEndpoint(ctx context.Context, arg UpsertDeviceEndpointParams) (bool, error) {
+	row := q.db.QueryRow(ctx, `INSERT INTO device_endpoints (id, device_id, endpoint_type, address, source, rtt_ms, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, now())
 ON CONFLICT (device_id, endpoint_type, address)
-DO UPDATE SET source = EXCLUDED.source, rtt_ms = EXCLUDED.rtt_ms, updated_at = now()`,
+DO UPDATE SET source = EXCLUDED.source, rtt_ms = EXCLUDED.rtt_ms, updated_at = now()
+WHERE device_endpoints.source IS DISTINCT FROM EXCLUDED.source
+   OR device_endpoints.rtt_ms IS DISTINCT FROM EXCLUDED.rtt_ms
+RETURNING id`,
 		arg.ID, arg.DeviceID, arg.EndpointType, arg.Address, arg.Source, arg.RttMs)
-	return err
+	var id string
+	err := row.Scan(&id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (q *Queries) ListEndpointsByUser(ctx context.Context, userID string) ([]DeviceEndpoint, error) {

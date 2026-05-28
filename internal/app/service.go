@@ -324,11 +324,12 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 	if err := s.store.Queries.UpdateDeviceHeartbeat(ctx, device.ID, defaultString(req.ClientVersion, device.ClientVersion), req.OSVersion); err != nil {
 		return PollResponse{}, err
 	}
+	endpointChanged := false
 	for _, endpoint := range req.Endpoints {
 		if strings.TrimSpace(endpoint.Address) == "" {
 			continue
 		}
-		_ = s.store.Queries.UpsertDeviceEndpoint(ctx, sqlc.UpsertDeviceEndpointParams{
+		changed, err := s.store.Queries.UpsertDeviceEndpoint(ctx, sqlc.UpsertDeviceEndpointParams{
 			ID:           "dep_" + ksuid.New().String(),
 			DeviceID:     device.ID,
 			EndpointType: defaultString(endpoint.Type, "unknown"),
@@ -336,6 +337,15 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 			Source:       endpoint.Source,
 			RttMs:        endpoint.RttMs,
 		})
+		if err != nil {
+			return PollResponse{}, err
+		}
+		endpointChanged = endpointChanged || changed
+	}
+	if endpointChanged {
+		if err := s.store.Queries.BumpNetmapVersion(ctx, device.UserID); err != nil {
+			return PollResponse{}, err
+		}
 	}
 	user, err := s.store.Queries.GetUser(ctx, device.UserID)
 	if err != nil {

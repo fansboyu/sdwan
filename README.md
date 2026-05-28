@@ -1,6 +1,6 @@
 # SD-WAN Controller
 
-`sdwan` 是一个最小版 Tailscale-like 产品骨架。当前版本是 `v1.1.4`，目标是先跑通软件层面的闭环：账号注册、设备入网、虚拟 IP 分配、HTTP polling、Netmap 下发、Linux Agent 渲染 WireGuard 配置。
+`sdwan` 是一个最小版 Tailscale-like 产品骨架。当前版本是 `v1.1.5`，目标是先跑通软件层面的闭环：账号注册、设备入网、虚拟 IP 分配、HTTP polling、Netmap 下发、Linux Agent 渲染 WireGuard 配置。
 
 默认控制器域名：
 
@@ -115,14 +115,14 @@ Token 明文只返回一次，数据库只保存 SHA-256 hash。
 
 ## Bootstrap WireGuard Peer
 
-`v1.1.4` 增加 Bootstrap WG Peer，用于让内核 WireGuard 自己向一个公网 WireGuard 节点发包，从而让 bootstrap 节点观察到客户端 kernel WireGuard socket 的真实公网 endpoint。
+当前版本支持 Bootstrap WG Peer，用于让内核 WireGuard 自己向一个公网 WireGuard 节点发包，从而让 bootstrap 节点观察到客户端 kernel WireGuard socket 的真实公网 endpoint。
 
 Controller 环境变量：
 
 ```text
 BOOTSTRAP_WG_PUBLIC_KEY   bootstrap WireGuard 公钥
-BOOTSTRAP_WG_ENDPOINT     bootstrap WireGuard 公网地址，例如 controller.englishlisten.cn:41641
-BOOTSTRAP_WG_ALLOWED_IP   默认 100.127.255.1/32
+BOOTSTRAP_WG_ENDPOINT     bootstrap WireGuard 公网地址，例如 controller.englishlisten.cn:51872
+BOOTSTRAP_WG_ALLOWED_IP   默认 100.254.254.254/32
 BOOTSTRAP_REPORT_TOKEN    bootstrap 节点回写 endpoint 使用的 Bearer token
 ```
 
@@ -133,8 +133,8 @@ BOOTSTRAP_REPORT_TOKEN    bootstrap 节点回写 endpoint 使用的 Bearer token
   "bootstrap_peer": {
     "device_id": "bootstrap",
     "hostname": "controller-bootstrap",
-    "allowed_ips": ["100.127.255.1/32"],
-    "endpoints": ["controller.englishlisten.cn:41641"],
+    "allowed_ips": ["100.254.254.254/32"],
+    "endpoints": ["controller.englishlisten.cn:51872"],
     "persistent_keepalive": 25
   }
 }
@@ -265,7 +265,7 @@ curl -X POST http://localhost:18080/api/v1/devices/register \
     "os": "linux",
     "arch": "amd64",
     "public_key": "wireguard-public-key",
-    "client_version": "v1.1.4"
+    "client_version": "v1.1.5"
   }'
 ```
 
@@ -277,7 +277,7 @@ curl -X POST http://localhost:18080/api/v1/devices/poll \
   -H "Content-Type: application/json" \
   -d '{
     "current_netmap_version": 1,
-    "client_version": "v1.1.4",
+    "client_version": "v1.1.5",
     "endpoints": [
       {"type":"lan","addr":"192.168.1.10:41641","source":"local"}
     ]
@@ -334,7 +334,7 @@ docker run --rm \
   -w /src \
   -e GOPROXY=https://goproxy.cn,direct \
   golang:1.25-alpine \
-  sh -c 'GOOS=linux GOARCH=amd64 go build -o downloads/v1.1.4/sdwan-agent-linux-amd64 ./cmd/agent'
+  sh -c 'GOOS=linux GOARCH=amd64 go build -o downloads/v1.1.5/sdwan-agent-linux-amd64 ./cmd/agent'
 ```
 
 ## 验证

@@ -486,7 +486,7 @@ func (s *Service) bootstrapPeer() *NetmapPeer {
 	}
 	allowedIP := strings.TrimSpace(s.cfg.BootstrapAllowedIP)
 	if allowedIP == "" {
-		allowedIP = "100.127.255.1/32"
+		allowedIP = "100.254.254.254/32"
 	}
 	return &NetmapPeer{
 		DeviceID:            "bootstrap",

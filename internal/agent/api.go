@@ -66,7 +66,6 @@ type Netmap struct {
 	Version       int64        `json:"version"`
 	Self          NetmapSelf   `json:"self"`
 	Peers         []NetmapPeer `json:"peers"`
-	STUNServers   []string     `json:"stun_servers"`
 	BootstrapPeer *NetmapPeer  `json:"bootstrap_peer,omitempty"`
 }
 

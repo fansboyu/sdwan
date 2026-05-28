@@ -87,7 +87,6 @@ CREATE TABLE IF NOT EXISTS relays (
   name TEXT NOT NULL,
   public_key TEXT NOT NULL DEFAULT '',
   endpoint TEXT NOT NULL DEFAULT '',
-  stun_endpoint TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
   last_seen_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()

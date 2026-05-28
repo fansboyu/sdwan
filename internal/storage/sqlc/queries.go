@@ -312,7 +312,7 @@ ORDER BY created_at DESC`, userID)
 }
 
 func (q *Queries) ListRelaysByUser(ctx context.Context, userID string) ([]Relay, error) {
-	rows, err := q.db.Query(ctx, `SELECT id, user_id, name, public_key, endpoint, stun_endpoint, status, last_seen_at, created_at
+	rows, err := q.db.Query(ctx, `SELECT id, user_id, name, public_key, endpoint, status, last_seen_at, created_at
 FROM relays
 WHERE user_id = $1
 ORDER BY created_at DESC`, userID)
@@ -323,7 +323,7 @@ ORDER BY created_at DESC`, userID)
 	var items []Relay
 	for rows.Next() {
 		var r Relay
-		if err := rows.Scan(&r.ID, &r.UserID, &r.Name, &r.PublicKey, &r.Endpoint, &r.STUNEndpoint, &r.Status, &r.LastSeenAt, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.UserID, &r.Name, &r.PublicKey, &r.Endpoint, &r.Status, &r.LastSeenAt, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, r)

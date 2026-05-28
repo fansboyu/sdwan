@@ -80,13 +80,12 @@ type SubnetRoute struct {
 }
 
 type Relay struct {
-	ID           string     `json:"id"`
-	UserID       string     `json:"user_id"`
-	Name         string     `json:"name"`
-	PublicKey    string     `json:"public_key"`
-	Endpoint     string     `json:"endpoint"`
-	STUNEndpoint string     `json:"stun_endpoint"`
-	Status       string     `json:"status"`
-	LastSeenAt   *time.Time `json:"last_seen_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID         string     `json:"id"`
+	UserID     string     `json:"user_id"`
+	Name       string     `json:"name"`
+	PublicKey  string     `json:"public_key"`
+	Endpoint   string     `json:"endpoint"`
+	Status     string     `json:"status"`
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
 }

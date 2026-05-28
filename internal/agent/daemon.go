@@ -80,7 +80,6 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 	if err != nil {
 		return interval, err
 	}
-	cfg.STUNServers = netmap.STUNServers
 
 	content, err := RenderWireGuardConfig(WGRenderInput{
 		PrivateKey:    cfg.PrivateKey,

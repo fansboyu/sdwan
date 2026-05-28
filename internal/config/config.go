@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"englishlisten/sdwan/internal/version"
@@ -20,7 +19,6 @@ type Config struct {
 	DefaultPollInterval       time.Duration
 	MinSupportedClientVersion string
 	LatestClientVersion       string
-	STUNServers               []string
 	BootstrapPublicKey        string
 	BootstrapEndpoint         string
 	BootstrapAllowedIP        string
@@ -36,9 +34,8 @@ func Load() Config {
 		ControllerURL:             getenv("CONTROLLER_URL", "https://controller.englishlisten.cn"),
 		DefaultMaxDevices:         int32(getenvInt("DEFAULT_MAX_DEVICES", 254)),
 		DefaultPollInterval:       time.Duration(getenvInt("POLL_INTERVAL_SECONDS", 15)) * time.Second,
-		MinSupportedClientVersion: getenv("MIN_SUPPORTED_CLIENT_VERSION", "v1.1.5"),
-		LatestClientVersion:       getenv("LATEST_CLIENT_VERSION", "v1.1.5"),
-		STUNServers:               getenvList("STUN_SERVERS", []string{"stun:controller.englishlisten.cn:3478"}),
+		MinSupportedClientVersion: getenv("MIN_SUPPORTED_CLIENT_VERSION", version.Version),
+		LatestClientVersion:       getenv("LATEST_CLIENT_VERSION", version.Version),
 		BootstrapPublicKey:        getenv("BOOTSTRAP_WG_PUBLIC_KEY", ""),
 		BootstrapEndpoint:         getenv("BOOTSTRAP_WG_ENDPOINT", ""),
 		BootstrapAllowedIP:        getenv("BOOTSTRAP_WG_ALLOWED_IP", "100.254.254.254/32"),
@@ -63,25 +60,6 @@ func getenvInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
-}
-
-func getenvList(key string, fallback []string) []string {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-	parts := strings.Split(value, ",")
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			result = append(result, part)
-		}
-	}
-	if len(result) == 0 {
-		return fallback
-	}
-	return result
 }
 
 func parseLogLevel(value string) slog.Level {

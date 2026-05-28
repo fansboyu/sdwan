@@ -329,6 +329,9 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 		if strings.TrimSpace(endpoint.Address) == "" {
 			continue
 		}
+		if endpoint.Type == "stun" {
+			continue
+		}
 		changed, err := s.store.Queries.UpsertDeviceEndpoint(ctx, sqlc.UpsertDeviceEndpointParams{
 			ID:           "dep_" + ksuid.New().String(),
 			DeviceID:     device.ID,
@@ -370,7 +373,6 @@ type Netmap struct {
 	Version       int64         `json:"version"`
 	Self          NetmapSelf    `json:"self"`
 	Peers         []NetmapPeer  `json:"peers"`
-	STUNServers   []string      `json:"stun_servers"`
 	BootstrapPeer *NetmapPeer   `json:"bootstrap_peer,omitempty"`
 	Relays        []interface{} `json:"relays"`
 }
@@ -409,9 +411,9 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 	if err != nil {
 		return Netmap{}, err
 	}
-	endpointsByDevice := map[string][]string{}
+	endpointsByDevice := map[string][]sqlc.DeviceEndpoint{}
 	for _, endpoint := range endpoints {
-		endpointsByDevice[endpoint.DeviceID] = append(endpointsByDevice[endpoint.DeviceID], endpoint.Address)
+		endpointsByDevice[endpoint.DeviceID] = append(endpointsByDevice[endpoint.DeviceID], endpoint)
 	}
 
 	peers := make([]NetmapPeer, 0, len(devices)-1)
@@ -419,8 +421,7 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 		if d.ID == self.ID || d.Status != "active" {
 			continue
 		}
-		peerEndpoints := endpointsByDevice[d.ID]
-		sort.Strings(peerEndpoints)
+		peerEndpoints := orderedEndpointAddresses(endpointsByDevice[d.ID])
 		peers = append(peers, NetmapPeer{
 			DeviceID:            d.ID,
 			Hostname:            d.Hostname,
@@ -440,10 +441,52 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 			PublicKey: self.PublicKey,
 		},
 		Peers:         peers,
-		STUNServers:   s.cfg.STUNServers,
 		BootstrapPeer: s.bootstrapPeer(),
 		Relays:        []interface{}{},
 	}, nil
+}
+
+func orderedEndpointAddresses(endpoints []sqlc.DeviceEndpoint) []string {
+	if len(endpoints) == 0 {
+		return nil
+	}
+	items := append([]sqlc.DeviceEndpoint(nil), endpoints...)
+	sort.SliceStable(items, func(i, j int) bool {
+		left := endpointPriority(items[i].EndpointType)
+		right := endpointPriority(items[j].EndpointType)
+		if left != right {
+			return left < right
+		}
+		if !items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return items[i].UpdatedAt.After(items[j].UpdatedAt)
+		}
+		return items[i].Address < items[j].Address
+	})
+	result := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, item := range items {
+		if strings.TrimSpace(item.Address) == "" || seen[item.Address] {
+			continue
+		}
+		seen[item.Address] = true
+		result = append(result, item.Address)
+	}
+	return result
+}
+
+func endpointPriority(endpointType string) int {
+	switch endpointType {
+	case "bootstrap":
+		return 0
+	case "manual":
+		return 1
+	case "lan":
+		return 2
+	case "ipv6":
+		return 3
+	default:
+		return 9
+	}
 }
 
 type BootstrapEndpointReportRequest struct {

@@ -42,6 +42,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/devices/register", r.registerDevice)
 	r.mux.HandleFunc("POST /api/v1/devices/poll", r.poll)
 	r.mux.HandleFunc("GET /api/v1/netmap", r.netmap)
+	r.mux.HandleFunc("POST /api/v1/bootstrap/endpoints", r.reportBootstrapEndpoint)
 }
 
 func (r *Router) healthz(w http.ResponseWriter, _ *http.Request) {
@@ -213,6 +214,23 @@ func (r *Router) netmap(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (r *Router) reportBootstrapEndpoint(w http.ResponseWriter, req *http.Request) {
+	var body app.BootstrapEndpointReportRequest
+	if err := readJSON(req, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := r.svc.ReportBootstrapEndpoint(req.Context(), req.Header.Get("Authorization"), body); err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, app.ErrUnauthorized) {
+			status = http.StatusUnauthorized
+		}
+		writeError(w, status, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (r *Router) withMiddleware(next http.Handler) http.Handler {

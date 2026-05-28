@@ -175,6 +175,19 @@ WHERE id = $1`, id)
 	return d, err
 }
 
+func (q *Queries) GetDeviceByPublicKey(ctx context.Context, publicKey string) (Device, error) {
+	row := q.db.QueryRow(ctx, `SELECT id, user_id, hostname, os, arch, public_key, host(virtual_ip),
+  status, client_version, os_version, last_seen_at, created_at
+FROM devices
+WHERE public_key = $1
+ORDER BY created_at DESC
+LIMIT 1`, publicKey)
+	var d Device
+	err := row.Scan(&d.ID, &d.UserID, &d.Hostname, &d.OS, &d.Arch, &d.PublicKey, &d.VirtualIP,
+		&d.Status, &d.ClientVersion, &d.OSVersion, &d.LastSeenAt, &d.CreatedAt)
+	return d, err
+}
+
 func (q *Queries) ListDevicesByUser(ctx context.Context, userID string) ([]Device, error) {
 	rows, err := q.db.Query(ctx, `SELECT id, user_id, hostname, os, arch, public_key, host(virtual_ip),
   status, client_version, os_version, last_seen_at, created_at

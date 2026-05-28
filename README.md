@@ -1,6 +1,6 @@
 # SD-WAN Controller
 
-`sdwan` 是一个最小版 Tailscale-like 产品骨架。当前版本是 `v1.1.3`，目标是先跑通软件层面的闭环：账号注册、设备入网、虚拟 IP 分配、HTTP polling、Netmap 下发、Linux Agent 渲染 WireGuard 配置。
+`sdwan` 是一个最小版 Tailscale-like 产品骨架。当前版本是 `v1.1.4`，目标是先跑通软件层面的闭环：账号注册、设备入网、虚拟 IP 分配、HTTP polling、Netmap 下发、Linux Agent 渲染 WireGuard 配置。
 
 默认控制器域名：
 
@@ -113,6 +113,58 @@ Device Token:
 
 Token 明文只返回一次，数据库只保存 SHA-256 hash。
 
+## Bootstrap WireGuard Peer
+
+`v1.1.4` 增加 Bootstrap WG Peer，用于让内核 WireGuard 自己向一个公网 WireGuard 节点发包，从而让 bootstrap 节点观察到客户端 kernel WireGuard socket 的真实公网 endpoint。
+
+Controller 环境变量：
+
+```text
+BOOTSTRAP_WG_PUBLIC_KEY   bootstrap WireGuard 公钥
+BOOTSTRAP_WG_ENDPOINT     bootstrap WireGuard 公网地址，例如 controller.englishlisten.cn:41641
+BOOTSTRAP_WG_ALLOWED_IP   默认 100.127.255.1/32
+BOOTSTRAP_REPORT_TOKEN    bootstrap 节点回写 endpoint 使用的 Bearer token
+```
+
+当这些变量配置完整时，`/api/v1/netmap` 会额外下发：
+
+```json
+{
+  "bootstrap_peer": {
+    "device_id": "bootstrap",
+    "hostname": "controller-bootstrap",
+    "allowed_ips": ["100.127.255.1/32"],
+    "endpoints": ["controller.englishlisten.cn:41641"],
+    "persistent_keepalive": 25
+  }
+}
+```
+
+Agent 会把它渲染进 `/etc/wireguard/sdwan0.conf`，触发 kernel WireGuard 对 bootstrap 节点发 handshake/keepalive。
+
+bootstrap 节点可运行脚本回写观察到的 endpoint：
+
+```bash
+sudo BOOTSTRAP_WG_INTERFACE=sdwan-bootstrap \
+  CONTROLLER_URL=https://controller.englishlisten.cn \
+  BOOTSTRAP_REPORT_TOKEN=your_report_token \
+  /opt/sdwan/deploy/bootstrap/report-endpoints.sh
+```
+
+该脚本会读取：
+
+```bash
+wg show sdwan-bootstrap dump
+```
+
+并把每个 peer 的 `public_key + endpoint` 回写到：
+
+```text
+POST /api/v1/bootstrap/endpoints
+```
+
+注意：bootstrap 方案能拿到 kernel WireGuard 到 bootstrap 节点的真实 NAT 映射，但对 symmetric NAT 仍不保证 P2P 成功。无法直连时仍需要 Relay。
+
 ## 本地运行
 
 ```bash
@@ -213,7 +265,7 @@ curl -X POST http://localhost:18080/api/v1/devices/register \
     "os": "linux",
     "arch": "amd64",
     "public_key": "wireguard-public-key",
-    "client_version": "v1.1.3"
+    "client_version": "v1.1.4"
   }'
 ```
 
@@ -225,7 +277,7 @@ curl -X POST http://localhost:18080/api/v1/devices/poll \
   -H "Content-Type: application/json" \
   -d '{
     "current_netmap_version": 1,
-    "client_version": "v1.1.3",
+    "client_version": "v1.1.4",
     "endpoints": [
       {"type":"lan","addr":"192.168.1.10:41641","source":"local"}
     ]
@@ -282,7 +334,7 @@ docker run --rm \
   -w /src \
   -e GOPROXY=https://goproxy.cn,direct \
   golang:1.25-alpine \
-  sh -c 'GOOS=linux GOARCH=amd64 go build -o downloads/v1.1.3/sdwan-agent-linux-amd64 ./cmd/agent'
+  sh -c 'GOOS=linux GOARCH=amd64 go build -o downloads/v1.1.4/sdwan-agent-linux-amd64 ./cmd/agent'
 ```
 
 ## 验证

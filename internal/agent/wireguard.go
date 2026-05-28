@@ -57,26 +57,33 @@ func RenderWireGuardConfig(input WGRenderInput) (string, error) {
 		return input.Netmap.Peers[i].VirtualIP < input.Netmap.Peers[j].VirtualIP
 	})
 	for _, peer := range input.Netmap.Peers {
-		if peer.PublicKey == "" {
-			continue
-		}
-		b.WriteString("[Peer]\n")
-		b.WriteString("# " + peer.Hostname + " " + peer.VirtualIP + "\n")
-		b.WriteString("PublicKey = " + peer.PublicKey + "\n")
-		if len(peer.AllowedIPs) == 0 {
-			b.WriteString("AllowedIPs = " + hostOnly(peer.VirtualIP) + "/32\n")
-		} else {
-			b.WriteString("AllowedIPs = " + strings.Join(peer.AllowedIPs, ", ") + "\n")
-		}
-		if len(peer.Endpoints) > 0 {
-			b.WriteString("Endpoint = " + peer.Endpoints[0] + "\n")
-		}
-		if peer.PersistentKeepalive > 0 {
-			b.WriteString(fmt.Sprintf("PersistentKeepalive = %d\n", peer.PersistentKeepalive))
-		}
-		b.WriteString("\n")
+		writePeer(&b, peer)
+	}
+	if input.Netmap.BootstrapPeer != nil {
+		writePeer(&b, *input.Netmap.BootstrapPeer)
 	}
 	return b.String(), nil
+}
+
+func writePeer(b *strings.Builder, peer NetmapPeer) {
+	if peer.PublicKey == "" {
+		return
+	}
+	b.WriteString("[Peer]\n")
+	b.WriteString("# " + peer.Hostname + " " + peer.VirtualIP + "\n")
+	b.WriteString("PublicKey = " + peer.PublicKey + "\n")
+	if len(peer.AllowedIPs) == 0 {
+		b.WriteString("AllowedIPs = " + hostOnly(peer.VirtualIP) + "/32\n")
+	} else {
+		b.WriteString("AllowedIPs = " + strings.Join(peer.AllowedIPs, ", ") + "\n")
+	}
+	if len(peer.Endpoints) > 0 {
+		b.WriteString("Endpoint = " + peer.Endpoints[0] + "\n")
+	}
+	if peer.PersistentKeepalive > 0 {
+		b.WriteString(fmt.Sprintf("PersistentKeepalive = %d\n", peer.PersistentKeepalive))
+	}
+	b.WriteString("\n")
 }
 
 func WriteWireGuardConfig(path string, content string) error {

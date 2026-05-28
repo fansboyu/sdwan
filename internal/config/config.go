@@ -21,6 +21,10 @@ type Config struct {
 	MinSupportedClientVersion string
 	LatestClientVersion       string
 	STUNServers               []string
+	BootstrapPublicKey        string
+	BootstrapEndpoint         string
+	BootstrapAllowedIP        string
+	BootstrapReportToken      string
 }
 
 func Load() Config {
@@ -32,9 +36,13 @@ func Load() Config {
 		ControllerURL:             getenv("CONTROLLER_URL", "https://controller.englishlisten.cn"),
 		DefaultMaxDevices:         int32(getenvInt("DEFAULT_MAX_DEVICES", 254)),
 		DefaultPollInterval:       time.Duration(getenvInt("POLL_INTERVAL_SECONDS", 15)) * time.Second,
-		MinSupportedClientVersion: getenv("MIN_SUPPORTED_CLIENT_VERSION", "v1.1.3"),
-		LatestClientVersion:       getenv("LATEST_CLIENT_VERSION", "v1.1.3"),
+		MinSupportedClientVersion: getenv("MIN_SUPPORTED_CLIENT_VERSION", "v1.1.4"),
+		LatestClientVersion:       getenv("LATEST_CLIENT_VERSION", "v1.1.4"),
 		STUNServers:               getenvList("STUN_SERVERS", []string{"stun:controller.englishlisten.cn:3478"}),
+		BootstrapPublicKey:        getenv("BOOTSTRAP_WG_PUBLIC_KEY", ""),
+		BootstrapEndpoint:         getenv("BOOTSTRAP_WG_ENDPOINT", ""),
+		BootstrapAllowedIP:        getenv("BOOTSTRAP_WG_ALLOWED_IP", "100.127.255.1/32"),
+		BootstrapReportToken:      getenv("BOOTSTRAP_REPORT_TOKEN", ""),
 	}
 }
 

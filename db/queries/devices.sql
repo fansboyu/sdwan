@@ -20,6 +20,14 @@ SELECT id, user_id, hostname, os, arch, public_key, host(virtual_ip),
 FROM devices
 WHERE id = $1;
 
+-- name: GetDeviceByPublicKey :one
+SELECT id, user_id, hostname, os, arch, public_key, host(virtual_ip),
+  status, client_version, os_version, last_seen_at, created_at
+FROM devices
+WHERE public_key = $1
+ORDER BY created_at DESC
+LIMIT 1;
+
 -- name: ListDevicesByUser :many
 SELECT id, user_id, hostname, os, arch, public_key, host(virtual_ip),
   status, client_version, os_version, last_seen_at, created_at

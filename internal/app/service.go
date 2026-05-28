@@ -367,11 +367,12 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 }
 
 type Netmap struct {
-	Version     int64         `json:"version"`
-	Self        NetmapSelf    `json:"self"`
-	Peers       []NetmapPeer  `json:"peers"`
-	STUNServers []string      `json:"stun_servers"`
-	Relays      []interface{} `json:"relays"`
+	Version       int64         `json:"version"`
+	Self          NetmapSelf    `json:"self"`
+	Peers         []NetmapPeer  `json:"peers"`
+	STUNServers   []string      `json:"stun_servers"`
+	BootstrapPeer *NetmapPeer   `json:"bootstrap_peer,omitempty"`
+	Relays        []interface{} `json:"relays"`
 }
 
 type NetmapSelf struct {
@@ -438,10 +439,64 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 			VirtualIP: self.VirtualIP,
 			PublicKey: self.PublicKey,
 		},
-		Peers:       peers,
-		STUNServers: s.cfg.STUNServers,
-		Relays:      []interface{}{},
+		Peers:         peers,
+		STUNServers:   s.cfg.STUNServers,
+		BootstrapPeer: s.bootstrapPeer(),
+		Relays:        []interface{}{},
 	}, nil
+}
+
+type BootstrapEndpointReportRequest struct {
+	PublicKey string `json:"public_key"`
+	Endpoint  string `json:"endpoint"`
+}
+
+func (s *Service) ReportBootstrapEndpoint(ctx context.Context, bearer string, req BootstrapEndpointReportRequest) error {
+	if s.cfg.BootstrapReportToken == "" || strings.TrimPrefix(strings.TrimSpace(bearer), "Bearer ") != s.cfg.BootstrapReportToken {
+		return ErrUnauthorized
+	}
+	publicKey := strings.TrimSpace(req.PublicKey)
+	endpoint := strings.TrimSpace(req.Endpoint)
+	if publicKey == "" || endpoint == "" {
+		return errors.New("public_key and endpoint are required")
+	}
+	device, err := s.store.Queries.GetDeviceByPublicKey(ctx, publicKey)
+	if err != nil {
+		return err
+	}
+	changed, err := s.store.Queries.UpsertDeviceEndpoint(ctx, sqlc.UpsertDeviceEndpointParams{
+		ID:           "dep_" + ksuid.New().String(),
+		DeviceID:     device.ID,
+		EndpointType: "bootstrap",
+		Address:      endpoint,
+		Source:       "wg-bootstrap",
+	})
+	if err != nil {
+		return err
+	}
+	if changed {
+		return s.store.Queries.BumpNetmapVersion(ctx, device.UserID)
+	}
+	return nil
+}
+
+func (s *Service) bootstrapPeer() *NetmapPeer {
+	if strings.TrimSpace(s.cfg.BootstrapPublicKey) == "" || strings.TrimSpace(s.cfg.BootstrapEndpoint) == "" {
+		return nil
+	}
+	allowedIP := strings.TrimSpace(s.cfg.BootstrapAllowedIP)
+	if allowedIP == "" {
+		allowedIP = "100.127.255.1/32"
+	}
+	return &NetmapPeer{
+		DeviceID:            "bootstrap",
+		Hostname:            "controller-bootstrap",
+		VirtualIP:           strings.TrimSuffix(allowedIP, "/32"),
+		PublicKey:           strings.TrimSpace(s.cfg.BootstrapPublicKey),
+		AllowedIPs:          []string{allowedIP},
+		Endpoints:           []string{strings.TrimSpace(s.cfg.BootstrapEndpoint)},
+		PersistentKeepalive: 25,
+	}
 }
 
 func (s *Service) ServerVersion() map[string]any {

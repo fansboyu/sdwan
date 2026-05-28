@@ -35,6 +35,14 @@ FROM devices
 WHERE user_id = $1
 ORDER BY virtual_ip ASC;
 
+-- name: ListActiveDevices :many
+SELECT id, user_id, hostname, os, arch, public_key, host(virtual_ip),
+  status, client_version, os_version, last_seen_at, created_at
+FROM devices
+WHERE status = 'active'
+  AND public_key <> ''
+ORDER BY virtual_ip ASC;
+
 -- name: CountActiveDevicesByUser :one
 SELECT count(*)::int
 FROM devices

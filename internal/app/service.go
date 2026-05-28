@@ -494,9 +494,42 @@ type BootstrapEndpointReportRequest struct {
 	Endpoint  string `json:"endpoint"`
 }
 
+type BootstrapPeer struct {
+	DeviceID  string `json:"device_id"`
+	Hostname  string `json:"hostname"`
+	PublicKey string `json:"public_key"`
+	VirtualIP string `json:"virtual_ip"`
+	Status    string `json:"status"`
+}
+
+type BootstrapPeersResponse struct {
+	Peers []BootstrapPeer `json:"peers"`
+}
+
+func (s *Service) BootstrapPeers(ctx context.Context, bearer string) (BootstrapPeersResponse, error) {
+	if err := s.authorizeBootstrap(bearer); err != nil {
+		return BootstrapPeersResponse{}, err
+	}
+	devices, err := s.store.Queries.ListActiveDevices(ctx)
+	if err != nil {
+		return BootstrapPeersResponse{}, err
+	}
+	peers := make([]BootstrapPeer, 0, len(devices))
+	for _, device := range devices {
+		peers = append(peers, BootstrapPeer{
+			DeviceID:  device.ID,
+			Hostname:  device.Hostname,
+			PublicKey: device.PublicKey,
+			VirtualIP: device.VirtualIP,
+			Status:    device.Status,
+		})
+	}
+	return BootstrapPeersResponse{Peers: peers}, nil
+}
+
 func (s *Service) ReportBootstrapEndpoint(ctx context.Context, bearer string, req BootstrapEndpointReportRequest) error {
-	if s.cfg.BootstrapReportToken == "" || strings.TrimPrefix(strings.TrimSpace(bearer), "Bearer ") != s.cfg.BootstrapReportToken {
-		return ErrUnauthorized
+	if err := s.authorizeBootstrap(bearer); err != nil {
+		return err
 	}
 	publicKey := strings.TrimSpace(req.PublicKey)
 	endpoint := strings.TrimSpace(req.Endpoint)
@@ -519,6 +552,13 @@ func (s *Service) ReportBootstrapEndpoint(ctx context.Context, bearer string, re
 	}
 	if changed {
 		return s.store.Queries.BumpNetmapVersion(ctx, device.UserID)
+	}
+	return nil
+}
+
+func (s *Service) authorizeBootstrap(bearer string) error {
+	if s.cfg.BootstrapReportToken == "" || strings.TrimPrefix(strings.TrimSpace(bearer), "Bearer ") != s.cfg.BootstrapReportToken {
+		return ErrUnauthorized
 	}
 	return nil
 }

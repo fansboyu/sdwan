@@ -210,6 +210,29 @@ ORDER BY virtual_ip ASC`, userID)
 	return items, rows.Err()
 }
 
+func (q *Queries) ListActiveDevices(ctx context.Context) ([]Device, error) {
+	rows, err := q.db.Query(ctx, `SELECT id, user_id, hostname, os, arch, public_key, host(virtual_ip),
+  status, client_version, os_version, last_seen_at, created_at
+FROM devices
+WHERE status = 'active'
+  AND public_key <> ''
+ORDER BY virtual_ip ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Device
+	for rows.Next() {
+		var d Device
+		if err := rows.Scan(&d.ID, &d.UserID, &d.Hostname, &d.OS, &d.Arch, &d.PublicKey, &d.VirtualIP,
+			&d.Status, &d.ClientVersion, &d.OSVersion, &d.LastSeenAt, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, d)
+	}
+	return items, rows.Err()
+}
+
 func (q *Queries) CountActiveDevicesByUser(ctx context.Context, userID string) (int32, error) {
 	var count int32
 	err := q.db.QueryRow(ctx, `SELECT count(*)::int FROM devices WHERE user_id = $1 AND status = 'active'`, userID).Scan(&count)

@@ -42,6 +42,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/devices/register", r.registerDevice)
 	r.mux.HandleFunc("POST /api/v1/devices/poll", r.poll)
 	r.mux.HandleFunc("GET /api/v1/netmap", r.netmap)
+	r.mux.HandleFunc("GET /api/v1/bootstrap/peers", r.bootstrapPeers)
 	r.mux.HandleFunc("POST /api/v1/bootstrap/endpoints", r.reportBootstrapEndpoint)
 }
 
@@ -231,6 +232,19 @@ func (r *Router) reportBootstrapEndpoint(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (r *Router) bootstrapPeers(w http.ResponseWriter, req *http.Request) {
+	resp, err := r.svc.BootstrapPeers(req.Context(), req.Header.Get("Authorization"))
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, app.ErrUnauthorized) {
+			status = http.StatusUnauthorized
+		}
+		writeError(w, status, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (r *Router) withMiddleware(next http.Handler) http.Handler {

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-VERSION="${SDWAN_VERSION:-v1.1.2}"
+VERSION="${SDWAN_VERSION:-v1.1.3}"
 CONTROLLER_URL="${SDWAN_CONTROLLER_URL:-https://controller.englishlisten.cn}"
 DOWNLOAD_BASE="${SDWAN_DOWNLOAD_BASE:-${CONTROLLER_URL}/downloads/${VERSION}}"
 BIN_NAME="sdwan-agent-linux-amd64"

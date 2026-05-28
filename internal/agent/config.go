@@ -68,6 +68,6 @@ func (c *Config) withDefaults() {
 		c.ListenPort = DefaultListenPort
 	}
 	if c.ClientVersion == "" {
-		c.ClientVersion = "v1.1.2"
+		c.ClientVersion = "v1.1.3"
 	}
 }

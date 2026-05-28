@@ -224,7 +224,6 @@ VALUES ($1, $2, $3, $4, $5, $6, now())
 ON CONFLICT (device_id, endpoint_type, address)
 DO UPDATE SET source = EXCLUDED.source, rtt_ms = EXCLUDED.rtt_ms, updated_at = now()
 WHERE device_endpoints.source IS DISTINCT FROM EXCLUDED.source
-   OR device_endpoints.rtt_ms IS DISTINCT FROM EXCLUDED.rtt_ms
 RETURNING id`,
 		arg.ID, arg.DeviceID, arg.EndpointType, arg.Address, arg.Source, arg.RttMs)
 	var id string

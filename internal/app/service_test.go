@@ -1,11 +1,13 @@
 package app
 
 import (
+	"errors"
 	"strconv"
 	"testing"
 	"time"
 
 	"englishlisten/sdwan/internal/storage/sqlc"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestAllocateDeviceIPSkipsDotZero(t *testing.T) {
@@ -44,5 +46,49 @@ func TestOrderedEndpointAddressesPrefersBootstrap(t *testing.T) {
 	}
 	if ordered[0] != "111.228.42.62:37425" {
 		t.Fatalf("expected bootstrap endpoint first, got %s", ordered[0])
+	}
+}
+
+func TestIsDeviceVirtualIPConflict(t *testing.T) {
+	err := &pgconn.PgError{
+		Code:           "23505",
+		ConstraintName: "devices_user_id_virtual_ip_key",
+	}
+	if !isDeviceVirtualIPConflict(err) {
+		t.Fatal("expected virtual IP unique constraint to be retryable")
+	}
+
+	err = &pgconn.PgError{
+		Code:           "23505",
+		ConstraintName: "devices_user_id_public_key_key",
+	}
+	if isDeviceVirtualIPConflict(err) {
+		t.Fatal("expected public key unique constraint to remain non-retryable")
+	}
+
+	if isDeviceVirtualIPConflict(errors.New("other error")) {
+		t.Fatal("expected non-postgres error to remain non-retryable")
+	}
+}
+
+func TestNormalizeSubnetRoutes(t *testing.T) {
+	routes, err := normalizeSubnetRoutes([]string{"192.168.1.12/24", "192.168.1.0/24", "10.0.0.0/8"})
+	if err != nil {
+		t.Fatalf("normalizeSubnetRoutes returned error: %v", err)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 deduplicated routes, got %d", len(routes))
+	}
+	if routes[0] != "10.0.0.0/8" || routes[1] != "192.168.1.0/24" {
+		t.Fatalf("unexpected normalized routes: %v", routes)
+	}
+}
+
+func TestNormalizeSubnetRoutesRejectsOverlayCIDR(t *testing.T) {
+	if _, err := normalizeSubnetRoutes([]string{"100.64.0.0/24"}); err == nil {
+		t.Fatal("expected overlay CIDR overlap to be rejected")
+	}
+	if _, err := normalizeSubnetRoutes([]string{"0.0.0.0/0"}); err == nil {
+		t.Fatal("expected default route to be rejected")
 	}
 }

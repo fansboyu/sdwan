@@ -1,45 +1,121 @@
 # SD-WAN Controller
 
-`sdwan` 是一个最小版 Tailscale-like 产品骨架。当前版本是 `v1.1.7`，重点是把 bootstrap 侧从定时脚本升级为常驻 `sdwan-bootstrap-agent`，让客户端 public key 同步和真实 endpoint 回写更接近实时。
+`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.1.8`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent、子网路由和免费升级业务逻辑。
 
-默认控制器域名：
+生产默认控制器域名：
 
 ```text
 controller.englishlisten.cn
 ```
 
-## 产品边界
+## 当前定位
 
-第一版取消“区域”概念，一个账号就是一个独立 Overlay 网络。
+一个账号就是一个独立 Overlay 网络。
 
 - 用户通过邮箱注册和登录。
-- 每个账号默认获得 `100.64.0.0/10` 下的独立 `/24` 地址池。
-- 每个账号默认最多 254 台设备，自动避开 `.0` 和 `.255`。
-- 登录后获得 `Admin Token`，它同时作为设备首次入网 Token。
-- 设备注册成功后获得独立 `Device Token`，后续 `poll` 和 `netmap` 使用 Device Token。
-- 同一账号下设备默认全互通。
-- 当前版本无 STUN endpoint 探测，真实公网 endpoint 由 bootstrap 侧观察。
+- 每个用户默认分配 `100.64.0.0/10` 下的独立 `/24` 地址池。
+- 设备注册后自动分配虚拟 IP，并避开 `.0` 和 `.255`。
+- 登录后得到 `Admin Token`，它可作为首台设备入网 Token。
+- 设备注册成功后得到独立 `Device Token`，后续 `poll` 和 `netmap` 使用设备 Token。
+- 同账号设备默认互通。
+- Endpoint 由 Agent 上报和 Bootstrap/Relay 侧观察，控制端每设备每类型保留最近 3 个。
 
-暂不做：ACL、MagicDNS、Exit Node、真实支付、WebSocket 推送、多 Controller 高可用、Relay fallback。
+暂不包含 ACL、MagicDNS、Exit Node、真实支付、审计日志、多 Controller 高可用和 DERP 风格自动 fallback。
 
-## 技术路线
+## 功能模块
 
-- Controller：Go、`net/http`、PostgreSQL、`pgx/v5`
-- 前端：Vue 3、Vite、原生 CSS，默认中文，可切换英文
-- Agent：Go，Linux 侧调用系统 WireGuard 工具链
-- Bootstrap Agent：Go，宿主机常驻进程，管理 `sdwan-bootstrap`
-- 数据面：Linux kernel WireGuard、`wg`、`wg-quick`
-- 部署：Docker Compose + 宿主机 systemd
-- 反向代理：生产环境由服务器上的独立 Caddy/Nginx 分流
+### Controller
 
-## 服务关系图
+- Go + `net/http` + PostgreSQL + `pgx/v5`
+- 用户注册、登录、账号状态、订阅状态
+- 设备注册、心跳、Endpoint 上报、Netmap 下发
+- 子网路由审批和下发
+- Relay 节点管理和 Relay 模式开关
+- 数据库 migration 自动执行
+
+### Web 管理台
+
+- Vue 3 + Vite
+- 深色科技风登录页和主页
+- 设备列表、设备详情、主节点设置
+- 子网路由审批
+- 套餐升级和免费升级入口
+- Relay 节点创建、启用、禁用
+
+### Linux Agent
+
+- 使用系统 WireGuard 工具链：`wg`、`wg-quick`
+- 支持设备注册、守护进程轮询、Endpoint 上报、Netmap 应用
+- 支持 `advertise_routes` 配置和命令行维护
+- 首次启动使用 `wg-quick up`
+- 后续配置变更使用 `wg syncconf` 和路由差异同步，减少中断
+- 支持 Linux 子网网关命令，开启 `ip_forward` 和 iptables 转发/NAT 规则
+
+### Windows Agent
+
+- 使用 userspace WireGuard + Wintun
+- 包含 Windows Service 和托盘程序
+- 支持注册、连接、断开、诊断
+- 按 Netmap 计算实际需要的路由，不再默认固定写入 `100.64.0.0/10`
+- 使用 `last_routes` 做路由差异同步和清理
+
+### Bootstrap Agent
+
+- 运行在 Bootstrap 主机上
+- 维护 `sdwan-bootstrap` WireGuard 接口 peer 列表
+- 观察真实 peer endpoint，并回写到控制端
+- 替代旧的定时脚本同步方案
+
+### Relay Agent
+
+- 运行在自建 Relay 主机上
+- 拉取控制端下发的 Relay peer 列表
+- 维护 `sdwan-relay` WireGuard 接口
+- 上报 Relay 心跳
+- 当前 Relay 模式采用账号级开关：开启后客户端主要连接 Relay，由 Relay 允许同账号全网互通
+
+## 套餐逻辑
+
+当前有两个付费能力版本：
+
+- `subnet`：快启子网服务，支持主节点和子网路由。
+- `relay`：自行搭建 Relay，包含 `subnet` 的全部能力，并开放 Relay 模式。
+
+当前用户量较少时支持免费升级：
+
+- 每个账号最多可免费升级 12 个月。
+- 从免费版升级到 `subnet` 会按剩余免费月数创建免费订阅。
+- 已免费升级到 `subnet` 后，再升级到 `relay` 不额外增加月份，只升级能力范围。
+- `relay` 是更高版本，拥有全部功能。
+
+## 网络模式
+
+### Hub 模式
+
+默认模式。
+
+- 同账号设备通过控制端下发 peer 信息互联。
+- 主节点设备可以发布 LAN 子网路由。
+- 控制台审批后，客户端收到对应子网路由。
+- 主节点机器本身仍需要开启系统转发和必要 NAT。
+
+### Relay 模式
+
+账号开启 Relay 模式后：
+
+- 客户端 Netmap 优先下发 Relay peer。
+- 客户端通过 Relay 访问同账号 Overlay 设备。
+- 当前策略是 Relay 模式下允许全网互通。
+- `relay` 套餐包含 `subnet`，因此仍可使用已审批的子网路由。
+
+## 架构图
 
 ```text
 Admin Browser
   |
-  | HTTPS
+  | HTTP/HTTPS
   v
-Admin Web(Vue/nginx)
+Web Console(Vue/nginx)
   |
   | /admin/*
   v
@@ -50,296 +126,270 @@ Controller(Go API)
 PostgreSQL
 
 
-Linux Agent A/B
+Linux / Windows Agent
   |
-  | HTTPS register / poll / netmap
+  | register / poll / netmap / endpoints
+  v
+Controller
+  |
+  | netmap
+  v
+WireGuard interface
+
+
+Bootstrap Agent
+  |
+  | peers / observed endpoints
   v
 Controller
 
-Linux Agent A/B
+
+Relay Agent
   |
-  | write /etc/wireguard/sdwan0.conf
-  | wg-quick down/up
-  v
-kernel WireGuard(sdwan0)
-  |
-  | UDP handshake / keepalive
-  v
-sdwan-bootstrap(宿主机 WireGuard)
-  ^
-  |
-sdwan-bootstrap-agent
-  |
-  | GET /api/v1/bootstrap/peers
-  | POST /api/v1/bootstrap/endpoints
+  | relay peers / heartbeat
   v
 Controller
 ```
 
-## Bootstrap Agent 流程
+## 端口
 
-`sdwan-bootstrap-agent` 是宿主机常驻服务，替代旧的 `sync-peers.sh + report-endpoints.sh` 定时任务。
+本地 Docker 默认：
 
-```text
-1. 启动 bootstrap-agent
-2. 读取 /etc/sdwan/bootstrap-agent.json
-3. 检查 sdwan-bootstrap 接口是否存在
-4. 调用 GET /api/v1/bootstrap/peers
-5. 对每个 active device 执行 wg set
-6. 周期性 wg show sdwan-bootstrap dump
-7. 如果 peer endpoint 变化，调用 POST /api/v1/bootstrap/endpoints
-8. Controller 写入 device_endpoints(endpoint_type=bootstrap)
-9. Controller bump netmap_version
-10. Linux Agent 下一轮 poll/netmap 拿到新 endpoint
-```
+- Web：`http://127.0.0.1:8081`
+- Controller：`http://127.0.0.1:18080`
+- PostgreSQL：容器内部 `5432`
 
-核心原则：
+Agent 默认：
 
-```text
-临时 STUN socket 得到的 endpoint 不可信。
-bootstrap 看到的是 kernel WireGuard socket 发出来的真实公网 endpoint。
-```
+- Linux Agent WireGuard：UDP `41641`
+- Windows Agent WireGuard：UDP `41642`
+- Bootstrap WireGuard：UDP `51872`
 
-## 本地 Docker Compose
+## 本地运行
 
-```bash
+```powershell
 docker compose up -d --build
 ```
 
-本地端口：
+访问：
 
 ```text
-Web:        http://localhost:8081
-Controller: http://localhost:18080
+http://127.0.0.1:8081
 ```
 
-生产建议分流：
+检查 Controller：
+
+```powershell
+curl http://127.0.0.1:18080/healthz
+curl http://127.0.0.1:18080/api/v1/server/version
+```
+
+## 数据库 migration
+
+正式 migration 位于：
 
 ```text
-https://controller.englishlisten.cn/        -> Web
-https://controller.englishlisten.cn/api/*   -> Controller
-https://controller.englishlisten.cn/admin/* -> Controller
-udp://controller.englishlisten.cn:51872     -> bootstrap WireGuard
+db/migrations/
 ```
 
-## 数据库设计
-
-| 表 | 作用 |
-| --- | --- |
-| `users` | 用户账号、Overlay 地址池、套餐 code、设备上限、netmap 版本 |
-| `admin_sessions` | 登录会话，保存 Admin Token hash |
-| `plans` | 套餐定义 |
-| `subscriptions` | 用户套餐订阅，当前预留 |
-| `devices` | 设备节点，保存 public key、virtual IP、Device Token hash |
-| `device_endpoints` | 设备 endpoint，当前主要存 `lan` 和 `bootstrap` |
-| `subnet_routes` | 快启子网服务预留表 |
-| `relays` | 自建 Relay 预留表 |
-| `audit_logs` | 操作日志预留表 |
-
-## Controller 环境变量
+Controller 启动时会自动执行 migration。当前 migration 版本：
 
 ```text
-DATABASE_URL
-CONTROLLER_URL
-LISTEN_ADDR
-DEFAULT_MAX_DEVICES
-POLL_INTERVAL_SECONDS
-MIN_SUPPORTED_CLIENT_VERSION
-LATEST_CLIENT_VERSION
-BOOTSTRAP_WG_PUBLIC_KEY
-BOOTSTRAP_WG_ENDPOINT
-BOOTSTRAP_WG_ALLOWED_IP
-BOOTSTRAP_REPORT_TOKEN
+4
 ```
 
-`BOOTSTRAP_REPORT_TOKEN` 同时用于：
+主要迁移：
 
-```text
-GET /api/v1/bootstrap/peers
-POST /api/v1/bootstrap/endpoints
-```
+- `000001_init`：基础用户、设备、endpoint、订阅等表结构
+- `000002_add_device_site_role`：设备站点角色
+- `000003_add_subscription_free_upgrade`：免费升级订阅字段
+- `000004_add_relay_mode`：Relay 模式和 Relay 节点表
 
-## Bootstrap Agent 部署
+## 主要 API
 
-构建二进制：
+公开接口：
 
-```bash
-docker run --rm \
-  -v /opt/sdwan:/src \
-  -w /src \
-  -e GOPROXY=https://goproxy.cn,direct \
-  golang:1.25-alpine \
-  sh -c 'mkdir -p downloads/v1.1.7 && GOOS=linux GOARCH=amd64 go build -o downloads/v1.1.7/sdwan-bootstrap-agent-linux-amd64 ./cmd/bootstrap-agent'
-```
+- `GET /healthz`
+- `GET /api/v1/server/version`
 
-安装：
+管理接口：
 
-```bash
-sudo install -m 0755 /opt/sdwan/downloads/v1.1.7/sdwan-bootstrap-agent-linux-amd64 /usr/local/bin/sdwan-bootstrap-agent
-sudo install -m 0644 /opt/sdwan/deploy/systemd/sdwan-bootstrap-agent.service /etc/systemd/system/sdwan-bootstrap-agent.service
-```
+- `POST /admin/auth/register`
+- `POST /admin/auth/login`
+- `GET /admin/account`
+- `GET /admin/devices`
+- `PATCH /admin/devices/{id}`
+- `POST /admin/devices/{id}/main-site`
+- `GET /admin/subnet-routes`
+- `PATCH /admin/subnet-routes/{id}/approval`
+- `POST /admin/subscription/free-upgrade`
+- `POST /admin/subscription/cancel`
+- `POST /admin/relays`
+- `POST /admin/relays/{id}/enable`
+- `POST /admin/relays/{id}/disable`
+- `POST /admin/relay-mode`
 
-写配置：
+设备接口：
 
-```bash
-sudo sdwan-bootstrap-agent \
-  --write-example-config \
-  --config /etc/sdwan/bootstrap-agent.json \
-  --controller https://controller.englishlisten.cn \
-  --bootstrap-token your_bootstrap_token \
-  --interface sdwan-bootstrap
-```
+- `POST /api/v1/devices/register`
+- `POST /api/v1/devices/poll`
+- `GET /api/v1/devices/netmap`
+- `POST /api/v1/devices/endpoints`
 
-配置文件示例：
+Bootstrap 接口：
 
-```json
-{
-  "controller_url": "https://controller.englishlisten.cn",
-  "bootstrap_token": "your_bootstrap_token",
-  "interface_name": "sdwan-bootstrap",
-  "sync_interval_seconds": 5,
-  "report_interval_seconds": 2,
-  "remove_stale_peers": false
-}
-```
+- `GET /api/v1/bootstrap/peers`
+- `POST /api/v1/bootstrap/endpoints`
 
-启动：
+Relay 接口：
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now sdwan-bootstrap-agent
-sudo systemctl status sdwan-bootstrap-agent --no-pager
-journalctl -u sdwan-bootstrap-agent -n 80 --no-pager
-```
+- `GET /api/v1/relays/peers`
+- `POST /api/v1/relays/heartbeat`
 
-注意：`sdwan-bootstrap-agent` 不创建 `/etc/wireguard/sdwan-bootstrap.conf`，它要求宿主机已经存在并启动：
+## Linux Agent 常用命令
 
-```bash
-sudo wg show sdwan-bootstrap
-```
-
-## Bootstrap API
-
-### 拉取 bootstrap peers
-
-```bash
-curl http://localhost:18080/api/v1/bootstrap/peers \
-  -H "Authorization: Bearer your_bootstrap_token"
-```
-
-返回：
-
-```json
-{
-  "peers": [
-    {
-      "device_id": "dev_xxx",
-      "hostname": "linux-01",
-      "public_key": "client-public-key",
-      "virtual_ip": "100.64.0.1",
-      "status": "active"
-    }
-  ]
-}
-```
-
-### 回写真实 endpoint
-
-```bash
-curl -X POST http://localhost:18080/api/v1/bootstrap/endpoints \
-  -H "Authorization: Bearer your_bootstrap_token" \
-  -H "Content-Type: application/json" \
-  -d '{"public_key":"client-public-key","endpoint":"111.228.42.62:37425"}'
-```
-
-## Linux Agent
-
-安装脚本：
-
-```bash
-curl -fsSL https://controller.englishlisten.cn/install.sh | sudo sh
-```
-
-注册设备：
+注册：
 
 ```bash
 sudo sdwan-agent register \
   --controller https://controller.englishlisten.cn \
-  --admin-token sdwan_admin_xxx
+  --token <ADMIN_TOKEN> \
+  --name linux-node-1
 ```
 
-启动 daemon：
+启动守护进程：
 
 ```bash
-sudo systemctl enable --now sdwan-agent
+sudo sdwan-agent daemon
 ```
 
-Agent 运行流程：
-
-```text
-1. 加载 /etc/sdwan/agent.json
-2. 检测 LAN endpoints
-3. 调用 /api/v1/devices/poll
-4. 如果 netmap_changed=true，拉取 /api/v1/netmap
-5. 渲染 /etc/wireguard/sdwan0.conf
-6. 执行 wg-quick down/up
-7. 更新本地 netmap_version
-8. 等待 poll_interval_seconds 后进入下一轮
-```
-
-构建 Linux Agent：
+查看、添加、删除发布的子网路由：
 
 ```bash
-docker run --rm \
-  -v /opt/sdwan:/src \
-  -w /src \
-  -e GOPROXY=https://goproxy.cn,direct \
-  golang:1.25-alpine \
-  sh -c 'mkdir -p downloads/v1.1.7 && GOOS=linux GOARCH=amd64 go build -o downloads/v1.1.7/sdwan-agent-linux-amd64 ./cmd/agent'
+sudo sdwan-agent routes list
+sudo sdwan-agent routes add 192.168.50.0/24
+sudo sdwan-agent routes remove 192.168.50.0/24
 ```
 
-## 常用 API
+开启 Linux 子网网关：
 
 ```bash
-curl http://localhost:18080/api/v1/server/version
+sudo sdwan-agent subnet-gateway enable \
+  --lan-cidr 192.168.50.0/24 \
+  --out-interface eth0
 ```
 
+查看或关闭：
+
 ```bash
-curl -X POST http://localhost:18080/admin/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"password123"}'
+sudo sdwan-agent subnet-gateway status
+sudo sdwan-agent subnet-gateway disable --lan-cidr 192.168.50.0/24
 ```
 
-```bash
-curl -X POST http://localhost:18080/admin/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"password123"}'
+## Windows Agent 常用命令
+
+构建：
+
+```powershell
+go build -o build\sdwan-service.exe .\cmd\windows-service
+go build -o build\sdwan-tray.exe .\cmd\windows-tray
 ```
 
-```bash
-curl http://localhost:18080/admin/devices \
-  -H "Authorization: Bearer sdwan_admin_xxx"
+安装服务：
+
+```powershell
+sdwan-service.exe install
+sdwan-service.exe start
 ```
 
-```bash
-curl http://localhost:18080/api/v1/netmap \
-  -H "Authorization: Bearer sdwan_device_xxx"
+诊断：
+
+```powershell
+sdwan-service.exe diagnose
 ```
 
-## 验证
+停止并移除：
+
+```powershell
+sdwan-service.exe stop
+sdwan-service.exe uninstall
+```
+
+## Bootstrap Agent 示例配置
+
+```json
+{
+  "controller_url": "https://controller.englishlisten.cn",
+  "bootstrap_token": "change-me",
+  "interface": "sdwan-bootstrap",
+  "poll_interval_seconds": 10,
+  "report_interval_seconds": 10
+}
+```
+
+运行：
 
 ```bash
+sudo sdwan-bootstrap-agent daemon --config /etc/sdwan/bootstrap-agent.json
+```
+
+## Relay Agent 示例配置
+
+```json
+{
+  "controller_url": "https://controller.englishlisten.cn",
+  "relay_token": "relay-token-from-admin-console",
+  "interface": "sdwan-relay",
+  "config_path": "/etc/wireguard/sdwan-relay.conf",
+  "poll_interval_seconds": 10,
+  "report_interval_seconds": 10
+}
+```
+
+运行：
+
+```bash
+sudo sdwan-relay-agent daemon --config /etc/sdwan/relay-agent.json
+```
+
+## 构建和测试
+
+Go 测试：
+
+```powershell
 go test ./...
+```
 
+Web 构建：
+
+```powershell
 cd web
 npm run build
 ```
 
-## 后续路线
+Docker 构建：
 
-1. Relay fallback，解决 symmetric NAT 和 UDP 直连失败场景。
-2. 多 bootstrap 节点和健康上报。
-3. `subnet_routes` 审批、下发和 Agent 路由配置。
-4. 设备禁用、删除、重命名。
-5. Windows Agent。
-6. 稳定后再考虑 WebSocket 推送替换 HTTP polling。
+```powershell
+docker compose build
+```
+
+## 生产部署提示
+
+- 建议部署目录：`/opt/sdwan`
+- Controller 使用独立 PostgreSQL 或 Compose PostgreSQL
+- Web 通过 Caddy/Nginx 反向代理
+- 下载文件建议放在 `/downloads/<version>/`
+- Linux Agent 安装脚本默认使用 `SDWAN_VERSION=v1.1.8`
+- Controller 需要配置强随机 `ADMIN_JWT_SECRET`
+- Bootstrap 和 Relay Token 必须独立生成并妥善保存
+
+## 已知限制
+
+- 暂无 ACL，账号内设备默认互通。
+- 暂无 MagicDNS。
+- 暂无 Exit Node。
+- Relay 当前是账号级手动开关，不是自动按连接质量 fallback。
+- Relay 健康检查和容量调度仍是基础版本。
+- Windows 端暂未实现子网网关能力。
+- 支付逻辑暂未接入真实支付渠道。
+- 审计日志字段预留但未完整产品化。

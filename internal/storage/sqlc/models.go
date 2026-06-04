@@ -10,6 +10,7 @@ type User struct {
 	OverlayCidr   string    `json:"overlay_cidr"`
 	MaxDevices    int32     `json:"max_devices"`
 	NetmapVersion int64     `json:"netmap_version"`
+	RelayMode     bool      `json:"relay_mode"`
 	Status        string    `json:"status"`
 	CreatedAt     time.Time `json:"created_at"`
 }
@@ -33,13 +34,15 @@ type Plan struct {
 }
 
 type Subscription struct {
-	ID        string     `json:"id"`
-	UserID    string     `json:"user_id"`
-	PlanCode  string     `json:"plan_code"`
-	Status    string     `json:"status"`
-	StartsAt  time.Time  `json:"starts_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID         string     `json:"id"`
+	UserID     string     `json:"user_id"`
+	PlanCode   string     `json:"plan_code"`
+	Status     string     `json:"status"`
+	Source     string     `json:"source"`
+	FreeMonths int32      `json:"free_months"`
+	StartsAt   time.Time  `json:"starts_at"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type Device struct {
@@ -50,6 +53,7 @@ type Device struct {
 	Arch          string     `json:"arch"`
 	PublicKey     string     `json:"public_key"`
 	VirtualIP     string     `json:"virtual_ip"`
+	SiteRole      string     `json:"site_role"`
 	Status        string     `json:"status"`
 	ClientVersion string     `json:"client_version"`
 	OSVersion     string     `json:"os_version"`
@@ -84,6 +88,7 @@ type Relay struct {
 	UserID     string     `json:"user_id"`
 	Name       string     `json:"name"`
 	PublicKey  string     `json:"public_key"`
+	VirtualIP  string     `json:"virtual_ip"`
 	Endpoint   string     `json:"endpoint"`
 	Status     string     `json:"status"`
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`

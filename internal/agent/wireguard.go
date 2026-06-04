@@ -1,7 +1,8 @@
 package agent
 
 import (
-	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -11,20 +12,24 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"golang.org/x/crypto/curve25519"
 )
 
 func GenerateKeyPair() (privateKey string, publicKey string, err error) {
-	private, err := exec.Command("wg", "genkey").Output()
-	if err != nil {
-		return "", "", fmt.Errorf("generate wireguard private key with wg: %w", err)
+	var private [32]byte
+	if _, err := rand.Read(private[:]); err != nil {
+		return "", "", fmt.Errorf("generate wireguard private key: %w", err)
 	}
-	cmd := exec.Command("wg", "pubkey")
-	cmd.Stdin = bytes.NewReader(private)
-	public, err := cmd.Output()
+	private[0] &= 248
+	private[31] &= 127
+	private[31] |= 64
+
+	public, err := curve25519.X25519(private[:], curve25519.Basepoint)
 	if err != nil {
-		return "", "", fmt.Errorf("derive wireguard public key with wg: %w", err)
+		return "", "", fmt.Errorf("derive wireguard public key: %w", err)
 	}
-	return strings.TrimSpace(string(private)), strings.TrimSpace(string(public)), nil
+	return base64.StdEncoding.EncodeToString(private[:]), base64.StdEncoding.EncodeToString(public), nil
 }
 
 type WGRenderInput struct {
@@ -94,19 +99,85 @@ func WriteWireGuardConfig(path string, content string) error {
 }
 
 func ApplyWireGuardConfig(interfaceName, configPath string) error {
-	if runtime.GOOS != "linux" {
-		return errors.New("wg-quick apply is supported only on linux")
-	}
 	if interfaceName == "" {
 		interfaceName = DefaultInterface
 	}
-	_ = exec.Command("wg-quick", "down", interfaceName).Run()
-	cmd := exec.Command("wg-quick", "up", configPath)
+	switch runtime.GOOS {
+	case "linux":
+		_ = exec.Command("wg-quick", "down", interfaceName).Run()
+		cmd := exec.Command("wg-quick", "up", configPath)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("wg-quick up failed: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	case "windows":
+		return installWindowsTunnel(interfaceName, configPath)
+	default:
+		return fmt.Errorf("wireguard apply is not supported on %s", runtime.GOOS)
+	}
+}
+
+func DownWireGuardTunnel(interfaceName string) error {
+	if interfaceName == "" {
+		interfaceName = DefaultInterface
+	}
+	switch runtime.GOOS {
+	case "linux":
+		output, err := exec.Command("wg-quick", "down", interfaceName).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("wg-quick down failed: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	case "windows":
+		wireguardPath, err := wireGuardToolPath("wireguard")
+		if err != nil {
+			return err
+		}
+		output, err := exec.Command(wireguardPath, "/uninstalltunnelservice", interfaceName).CombinedOutput()
+		if err != nil && !strings.Contains(strings.ToLower(string(output)), "does not exist") {
+			return fmt.Errorf("wireguard uninstall tunnel failed: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	default:
+		return fmt.Errorf("wireguard down is not supported on %s", runtime.GOOS)
+	}
+}
+
+func installWindowsTunnel(interfaceName, configPath string) error {
+	wireguardPath, err := wireGuardToolPath("wireguard")
+	if err != nil {
+		return err
+	}
+	_ = exec.Command(wireguardPath, "/uninstalltunnelservice", interfaceName).Run()
+	cmd := exec.Command(wireguardPath, "/installtunnelservice", configPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("wg-quick up failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("wireguard install tunnel failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func wireGuardToolPath(name string) (string, error) {
+	exe := name
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(exe), ".exe") {
+		exe += ".exe"
+	}
+	if path, err := exec.LookPath(exe); err == nil {
+		return path, nil
+	}
+	if runtime.GOOS == "windows" {
+		for _, base := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")} {
+			if base == "" {
+				continue
+			}
+			path := filepath.Join(base, "WireGuard", exe)
+			if _, err := os.Stat(path); err == nil {
+				return path, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("%s not found; install WireGuard and make sure %s is available", exe, exe)
 }
 
 func hostOnly(value string) string {

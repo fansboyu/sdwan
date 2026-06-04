@@ -52,6 +52,7 @@ type PollRequest struct {
 	ClientVersion        string           `json:"client_version"`
 	OSVersion            string           `json:"os_version"`
 	Endpoints            []EndpointReport `json:"endpoints"`
+	AdvertiseRoutes      []string         `json:"advertise_routes"`
 }
 
 type PollResponse struct {
@@ -64,6 +65,7 @@ type PollResponse struct {
 
 type Netmap struct {
 	Version       int64        `json:"version"`
+	OverlayCIDR   string       `json:"overlay_cidr"`
 	Self          NetmapSelf   `json:"self"`
 	Peers         []NetmapPeer `json:"peers"`
 	BootstrapPeer *NetmapPeer  `json:"bootstrap_peer,omitempty"`
@@ -74,6 +76,7 @@ type NetmapSelf struct {
 	Hostname  string `json:"hostname"`
 	VirtualIP string `json:"virtual_ip"`
 	PublicKey string `json:"public_key"`
+	SiteRole  string `json:"site_role"`
 }
 
 type NetmapPeer struct {

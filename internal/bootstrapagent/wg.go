@@ -38,9 +38,13 @@ func (m WGManager) SetPeer(ctx context.Context, peer Peer) error {
 	if publicKey == "" || virtualIP == "" {
 		return nil
 	}
+	allowedIPs := peer.AllowedIPs
+	if len(allowedIPs) == 0 {
+		allowedIPs = []string{virtualIP + "/32"}
+	}
 	cmd := exec.CommandContext(ctx, "wg", "set", m.InterfaceName,
 		"peer", publicKey,
-		"allowed-ips", virtualIP+"/32",
+		"allowed-ips", strings.Join(allowedIPs, ","),
 		"persistent-keepalive", "25",
 	)
 	output, err := cmd.CombinedOutput()

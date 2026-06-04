@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   overlay_cidr CIDR NOT NULL UNIQUE,
   max_devices INTEGER NOT NULL DEFAULT 254,
   netmap_version BIGINT NOT NULL DEFAULT 1,
+  relay_mode BOOLEAN NOT NULL DEFAULT false,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -86,6 +87,8 @@ CREATE TABLE IF NOT EXISTS relays (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   public_key TEXT NOT NULL DEFAULT '',
+  relay_token_hash TEXT UNIQUE,
+  virtual_ip INET NOT NULL DEFAULT '100.254.253.1',
   endpoint TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
   last_seen_at TIMESTAMPTZ,

@@ -25,11 +25,12 @@ func NewAPIClient(baseURL, token string) *APIClient {
 }
 
 type Peer struct {
-	DeviceID  string `json:"device_id"`
-	Hostname  string `json:"hostname"`
-	PublicKey string `json:"public_key"`
-	VirtualIP string `json:"virtual_ip"`
-	Status    string `json:"status"`
+	DeviceID   string   `json:"device_id"`
+	Hostname   string   `json:"hostname"`
+	PublicKey  string   `json:"public_key"`
+	VirtualIP  string   `json:"virtual_ip"`
+	Status     string   `json:"status"`
+	AllowedIPs []string `json:"allowed_ips"`
 }
 
 type peersResponse struct {

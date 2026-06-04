@@ -2,5 +2,6 @@
 *.log
 tmp/
 build/
+*.exe
 web/node_modules/
 web/dist/

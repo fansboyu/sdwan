@@ -30,3 +30,9 @@ SELECT overlay_cidr::text FROM users ORDER BY created_at DESC LIMIT 1;
 
 -- name: BumpNetmapVersion :exec
 UPDATE users SET netmap_version = netmap_version + 1 WHERE id = $1;
+
+-- name: UpdateUserPlan :exec
+UPDATE users SET plan_code = $2 WHERE id = $1;
+
+-- name: UpdateUserRelayMode :exec
+UPDATE users SET relay_mode = $2 WHERE id = $1;

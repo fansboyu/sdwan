@@ -19,7 +19,7 @@ func RunDaemon(ctx context.Context, opts DaemonOptions) error {
 		opts.ConfigPath = DefaultConfigPath
 	}
 	if opts.WGPath == "" {
-		opts.WGPath = "/etc/wireguard/sdwan0.conf"
+		opts.WGPath = DefaultWireGuardConfigPath
 	}
 
 	detector := EndpointDetector{Timeout: 3 * time.Second}
@@ -61,6 +61,7 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 		ClientVersion:        cfg.ClientVersion,
 		OSVersion:            cfg.OSVersion,
 		Endpoints:            endpoints,
+		AdvertiseRoutes:      cfg.AdvertiseRoutes,
 	})
 	if err != nil {
 		return 0, err
@@ -96,9 +97,11 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 	}
 
 	if opts.Apply {
-		if err := ApplyWireGuardConfig(cfg.InterfaceName, opts.WGPath); err != nil {
+		result, err := ApplyWireGuardConfigSmart(cfg, opts.WGPath, netmap)
+		if err != nil {
 			return interval, err
 		}
+		cfg.LastRoutes = result.LastRoutes
 	}
 
 	cfg.NetmapVersion = netmap.Version
@@ -106,6 +109,14 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 	if err := SaveConfig(opts.ConfigPath, cfg); err != nil {
 		return interval, err
 	}
-	log.Printf("netmap applied: version=%d peers=%d endpoints=%d apply=%v", netmap.Version, len(netmap.Peers), len(endpoints), opts.Apply)
+	log.Printf("netmap applied: version=%d role=%s peers=%d endpoints=%d bootstrap=%v apply=%v",
+		netmap.Version, defaultString(netmap.Self.SiteRole, "client"), len(netmap.Peers), len(endpoints), netmap.BootstrapPeer != nil, opts.Apply)
 	return interval, nil
+}
+
+func defaultString(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }

@@ -1,49 +1,33 @@
 controller.englishlisten.cn {
 	encode zstd gzip
 
-	handle /api-proxy/* {
-		uri strip_prefix /api-proxy
-		reverse_proxy controller:8080
+	handle /install.sh {
+		root * /opt/sdwan/downloads
+		file_server
+	}
+
+	handle /downloads/* {
+		root * /opt/sdwan
+		file_server
 	}
 
 	handle /api/* {
-		reverse_proxy controller:8080
+		reverse_proxy 127.0.0.1:18080
 	}
 
 	handle /admin/* {
-		reverse_proxy controller:8080
+		reverse_proxy 127.0.0.1:18080
 	}
 
 	handle /healthz {
-		reverse_proxy controller:8080
+		reverse_proxy 127.0.0.1:18080
 	}
 
 	handle /readyz {
-		reverse_proxy controller:8080
+		reverse_proxy 127.0.0.1:18080
 	}
 
 	handle {
-		reverse_proxy web:80
-	}
-}
-
-:80 {
-	encode zstd gzip
-
-	handle /api-proxy/* {
-		uri strip_prefix /api-proxy
-		reverse_proxy controller:8080
-	}
-
-	handle /api/* {
-		reverse_proxy controller:8080
-	}
-
-	handle /admin/* {
-		reverse_proxy controller:8080
-	}
-
-	handle {
-		reverse_proxy web:80
+		reverse_proxy 127.0.0.1:8081
 	}
 }

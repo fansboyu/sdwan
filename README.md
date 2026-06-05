@@ -202,7 +202,7 @@ SD-WAN 控制台 <noreply@mail.englishlisten.cn>
 
 ```text
 RESEND_API_KEY=re_xxx
-RESEND_FROM=SD-WAN 控制台 <noreply@mail.englishlisten.cn>
+RESEND_FROM=SD-WAN Controller <noreply@mail.englishlisten.cn>
 EMAIL_CODE_TTL_SECONDS=600
 EMAIL_CODE_COOLDOWN_SECONDS=60
 EMAIL_CODE_MAX_ATTEMPTS=5

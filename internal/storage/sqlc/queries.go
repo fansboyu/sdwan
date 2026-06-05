@@ -114,6 +114,49 @@ RETURNING id, user_id, expires_at, revoked_at, created_at`,
 	return s, err
 }
 
+type CreateEmailVerificationParams struct {
+	ID        string
+	Email     string
+	Purpose   string
+	CodeHash  string
+	ExpiresAt time.Time
+}
+
+func (q *Queries) CreateEmailVerification(ctx context.Context, arg CreateEmailVerificationParams) (EmailVerification, error) {
+	row := q.db.QueryRow(ctx, `INSERT INTO email_verifications (id, email, purpose, code_hash, expires_at)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, email, purpose, code_hash, expires_at, consumed_at, attempt_count, created_at`,
+		arg.ID, arg.Email, arg.Purpose, arg.CodeHash, arg.ExpiresAt)
+	var v EmailVerification
+	err := row.Scan(&v.ID, &v.Email, &v.Purpose, &v.CodeHash, &v.ExpiresAt, &v.ConsumedAt, &v.AttemptCount, &v.CreatedAt)
+	return v, err
+}
+
+func (q *Queries) GetLatestEmailVerification(ctx context.Context, email, purpose string) (EmailVerification, error) {
+	row := q.db.QueryRow(ctx, `SELECT id, email, purpose, code_hash, expires_at, consumed_at, attempt_count, created_at
+FROM email_verifications
+WHERE email = $1 AND purpose = $2
+ORDER BY created_at DESC
+LIMIT 1`, email, purpose)
+	var v EmailVerification
+	err := row.Scan(&v.ID, &v.Email, &v.Purpose, &v.CodeHash, &v.ExpiresAt, &v.ConsumedAt, &v.AttemptCount, &v.CreatedAt)
+	return v, err
+}
+
+func (q *Queries) ConsumeEmailVerification(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, `UPDATE email_verifications
+SET consumed_at = now()
+WHERE id = $1 AND consumed_at IS NULL`, id)
+	return err
+}
+
+func (q *Queries) IncrementEmailVerificationAttempts(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, `UPDATE email_verifications
+SET attempt_count = attempt_count + 1
+WHERE id = $1`, id)
+	return err
+}
+
 func (q *Queries) ListPlans(ctx context.Context) ([]Plan, error) {
 	rows, err := q.db.Query(ctx, `SELECT code, name, price_cents, max_devices, enable_subnet, enable_self_relay, created_at
 FROM plans

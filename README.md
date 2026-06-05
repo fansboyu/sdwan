@@ -1,6 +1,6 @@
 # SD-WAN Controller
 
-`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.1.8`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent、子网路由和免费升级业务逻辑。
+`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.1.9`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent、子网路由和免费升级业务逻辑。
 
 生产默认控制器域名：
 
@@ -184,6 +184,41 @@ curl http://127.0.0.1:18080/healthz
 curl http://127.0.0.1:18080/api/v1/server/version
 ```
 
+## 邮箱验证码
+
+注册账号需要邮箱一次性验证码。Controller 使用 Resend API 发送邮件，建议在 Resend 中验证二级发信域名：
+
+```text
+mail.englishlisten.cn
+```
+
+推荐发件人：
+
+```text
+SD-WAN 控制台 <noreply@mail.englishlisten.cn>
+```
+
+需要配置环境变量：
+
+```text
+RESEND_API_KEY=re_xxx
+RESEND_FROM=SD-WAN 控制台 <noreply@mail.englishlisten.cn>
+EMAIL_CODE_TTL_SECONDS=600
+EMAIL_CODE_COOLDOWN_SECONDS=60
+EMAIL_CODE_MAX_ATTEMPTS=5
+```
+
+注册流程：
+
+```text
+1. 用户输入邮箱并点击发送验证码
+2. Controller 检查邮箱是否已注册
+3. Controller 生成 6 位验证码并只保存 hash
+4. Resend 发送验证码邮件
+5. 用户输入验证码和密码完成注册
+6. 验证码校验通过后立即失效
+```
+
 ## 数据库 migration
 
 正式 migration 位于：
@@ -195,7 +230,7 @@ db/migrations/
 Controller 启动时会自动执行 migration。当前 migration 版本：
 
 ```text
-4
+5
 ```
 
 主要迁移：
@@ -204,6 +239,7 @@ Controller 启动时会自动执行 migration。当前 migration 版本：
 - `000002_add_device_site_role`：设备站点角色
 - `000003_add_subscription_free_upgrade`：免费升级订阅字段
 - `000004_add_relay_mode`：Relay 模式和 Relay 节点表
+- `000005_add_email_verifications`：注册邮箱验证码
 
 ## 主要 API
 
@@ -214,6 +250,7 @@ Controller 启动时会自动执行 migration。当前 migration 版本：
 
 管理接口：
 
+- `POST /admin/auth/email-code`
 - `POST /admin/auth/register`
 - `POST /admin/auth/login`
 - `GET /admin/account`
@@ -379,7 +416,7 @@ docker compose build
 - Controller 使用独立 PostgreSQL 或 Compose PostgreSQL
 - Web 通过 Caddy/Nginx 反向代理
 - 下载文件建议放在 `/downloads/<version>/`
-- Linux Agent 安装脚本默认使用 `SDWAN_VERSION=v1.1.8`
+- Linux Agent 安装脚本默认使用 `SDWAN_VERSION=v1.1.9`
 - Controller 需要配置强随机 `ADMIN_JWT_SECRET`
 - Bootstrap 和 Relay Token 必须独立生成并妥善保存
 

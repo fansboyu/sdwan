@@ -23,6 +23,11 @@ type Config struct {
 	BootstrapEndpoint         string
 	BootstrapAllowedIP        string
 	BootstrapReportToken      string
+	ResendAPIKey              string
+	ResendFrom                string
+	EmailCodeTTL              time.Duration
+	EmailCodeCooldown         time.Duration
+	EmailCodeMaxAttempts      int32
 }
 
 func Load() Config {
@@ -40,6 +45,11 @@ func Load() Config {
 		BootstrapEndpoint:         getenv("BOOTSTRAP_WG_ENDPOINT", ""),
 		BootstrapAllowedIP:        getenv("BOOTSTRAP_WG_ALLOWED_IP", "100.254.254.254/32"),
 		BootstrapReportToken:      getenv("BOOTSTRAP_REPORT_TOKEN", ""),
+		ResendAPIKey:              getenv("RESEND_API_KEY", ""),
+		ResendFrom:                getenv("RESEND_FROM", getenv("MAIL_FROM", "")),
+		EmailCodeTTL:              time.Duration(getenvInt("EMAIL_CODE_TTL_SECONDS", 600)) * time.Second,
+		EmailCodeCooldown:         time.Duration(getenvInt("EMAIL_CODE_COOLDOWN_SECONDS", 60)) * time.Second,
+		EmailCodeMaxAttempts:      int32(getenvInt("EMAIL_CODE_MAX_ATTEMPTS", 5)),
 	}
 }
 

@@ -23,6 +23,17 @@ type AdminSession struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+type EmailVerification struct {
+	ID           string     `json:"id"`
+	Email        string     `json:"email"`
+	Purpose      string     `json:"purpose"`
+	CodeHash     string     `json:"-"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	ConsumedAt   *time.Time `json:"consumed_at,omitempty"`
+	AttemptCount int32      `json:"attempt_count"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
 type Plan struct {
 	Code            string    `json:"code"`
 	Name            string    `json:"name"`

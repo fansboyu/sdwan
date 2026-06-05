@@ -6,7 +6,7 @@ This file is for AI coding agents and human maintainers who need to understand t
 
 `sdwan` is a minimal Tailscale-like SD-WAN product.
 
-Current version: `v1.1.8`
+Current version: `v1.1.9`
 
 The project is currently an MVP with:
 
@@ -358,7 +358,7 @@ cd /opt/sdwan
 git fetch --tags
 git reset --hard
 git clean -fd
-git checkout v1.1.8
+git checkout v1.1.9
 docker compose up -d --build controller web
 ```
 

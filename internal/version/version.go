@@ -1,6 +1,6 @@
 package version
 
 const (
-	Version    = "v1.1.8"
+	Version    = "v1.1.9"
 	APIVersion = "v1"
 )

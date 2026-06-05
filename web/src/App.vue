@@ -9,6 +9,9 @@ const account = ref(null)
 const authMode = ref('login')
 const email = ref('')
 const password = ref('')
+const emailCode = ref('')
+const emailCodeSending = ref(false)
+const emailCodeCooldown = ref(0)
 const devices = ref([])
 const selectedDevice = ref(null)
 const error = ref('')
@@ -185,10 +188,14 @@ async function loadDashboard() {
 async function submitAuth() {
   error.value = ''
   const path = authMode.value === 'login' ? '/admin/auth/login' : '/admin/auth/register'
+  const body = { email: email.value, password: password.value }
+  if (authMode.value === 'register') {
+    body.email_code = emailCode.value
+  }
   const response = await fetch(`${apiBase}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: email.value, password: password.value }),
+    body: JSON.stringify(body),
   })
   const payload = await readPayload(response)
   if (!response.ok) {
@@ -199,7 +206,36 @@ async function submitAuth() {
   user.value = payload.user || payload.admin_user
   localStorage.setItem('admin_token', payload.token)
   password.value = ''
+  emailCode.value = ''
   await loadDashboard()
+}
+
+async function sendEmailCode() {
+  error.value = ''
+  if (!email.value) {
+    error.value = '请先输入邮箱'
+    return
+  }
+  emailCodeSending.value = true
+  const response = await fetch(`${apiBase}/admin/auth/email-code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email.value, purpose: 'register' }),
+  })
+  const payload = await readPayload(response)
+  emailCodeSending.value = false
+  if (!response.ok) {
+    error.value = payload.error || '验证码发送失败，请稍后重试'
+    return
+  }
+  emailCodeCooldown.value = payload.cooldown_seconds || 60
+  const timer = window.setInterval(() => {
+    emailCodeCooldown.value -= 1
+    if (emailCodeCooldown.value <= 0) {
+      window.clearInterval(timer)
+      emailCodeCooldown.value = 0
+    }
+  }, 1000)
 }
 
 function logout() {
@@ -517,6 +553,20 @@ onMounted(async () => {
             <span>@</span>
             <input v-model="email" type="email" autocomplete="email" placeholder="请输入邮箱" required />
           </label>
+          <div class="code-row" v-if="authMode === 'register'">
+            <label class="login-field code-field">
+              <span>#</span>
+              <input v-model="emailCode" inputmode="numeric" autocomplete="one-time-code" placeholder="请输入邮箱验证码" required />
+            </label>
+            <button
+              class="code-button"
+              type="button"
+              :disabled="emailCodeSending || emailCodeCooldown > 0"
+              @click="sendEmailCode"
+            >
+              {{ emailCodeCooldown > 0 ? `${emailCodeCooldown}s` : (emailCodeSending ? '发送中' : '发送验证码') }}
+            </button>
+          </div>
           <label class="login-field">
             <span>⌁</span>
             <input

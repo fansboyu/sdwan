@@ -31,6 +31,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("GET /readyz", r.healthz)
 	r.mux.HandleFunc("GET /api/v1/server/version", r.serverVersion)
 
+	r.mux.HandleFunc("POST /admin/auth/email-code", r.sendEmailCode)
 	r.mux.HandleFunc("POST /admin/auth/register", r.registerAdmin)
 	r.mux.HandleFunc("POST /admin/auth/login", r.loginAdmin)
 	r.mux.HandleFunc("GET /admin/auth/me", r.me)
@@ -67,6 +68,20 @@ func (r *Router) serverVersion(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, r.svc.ServerVersion())
 }
 
+func (r *Router) sendEmailCode(w http.ResponseWriter, req *http.Request) {
+	var body app.EmailCodeRequest
+	if err := readJSON(req, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	resp, err := r.svc.SendEmailCode(req.Context(), body)
+	if err != nil {
+		writeError(w, authErrorStatus(err), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (r *Router) registerAdmin(w http.ResponseWriter, req *http.Request) {
 	var body app.AuthRequest
 	if err := readJSON(req, &body); err != nil {
@@ -75,11 +90,7 @@ func (r *Router) registerAdmin(w http.ResponseWriter, req *http.Request) {
 	}
 	resp, err := r.svc.RegisterAdmin(req.Context(), body)
 	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, app.ErrEmailAlreadyRegistered) {
-			status = http.StatusConflict
-		}
-		writeError(w, status, err)
+		writeError(w, authErrorStatus(err), err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, resp)
@@ -563,4 +574,21 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+func authErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, app.ErrEmailAlreadyRegistered):
+		return http.StatusConflict
+	case errors.Is(err, app.ErrEmailCodeCooldown):
+		return http.StatusTooManyRequests
+	case errors.Is(err, app.ErrEmailCodeNotConfigured):
+		return http.StatusServiceUnavailable
+	case errors.Is(err, app.ErrEmailCodeInvalid),
+		errors.Is(err, app.ErrEmailCodeExpired),
+		errors.Is(err, app.ErrEmailCodeTooManyAttempts):
+		return http.StatusBadRequest
+	default:
+		return http.StatusBadRequest
+	}
 }

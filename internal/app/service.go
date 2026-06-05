@@ -7,12 +7,15 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"math/big"
 	"net/netip"
 	"sort"
 	"strings"
 	"time"
 
 	"englishlisten/sdwan/internal/config"
+	"englishlisten/sdwan/internal/mailer"
 	"englishlisten/sdwan/internal/storage"
 	"englishlisten/sdwan/internal/storage/sqlc"
 	"englishlisten/sdwan/internal/version"
@@ -33,11 +36,17 @@ const (
 	subscriptionSourceFreeUpgrade = "free_upgrade"
 	siteRoleClient                = "client"
 	siteRoleMain                  = "main_site"
+	emailPurposeRegister          = "register"
 )
 
 var ErrUnauthorized = errors.New("unauthorized")
 var ErrUpgradeRequired = errors.New("upgrade required")
 var ErrEmailAlreadyRegistered = errors.New("邮箱名已经注册，请更换其他邮箱")
+var ErrEmailCodeNotConfigured = errors.New("邮件服务未配置，请联系管理员")
+var ErrEmailCodeCooldown = errors.New("验证码发送太频繁，请稍后再试")
+var ErrEmailCodeInvalid = errors.New("验证码错误，请重新输入")
+var ErrEmailCodeExpired = errors.New("验证码已过期，请重新获取")
+var ErrEmailCodeTooManyAttempts = errors.New("验证码尝试次数过多，请重新获取")
 
 type Service struct {
 	store *storage.Store
@@ -49,8 +58,20 @@ func NewService(store *storage.Store, cfg config.Config) *Service {
 }
 
 type AuthRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email     string `json:"email"`
+	Password  string `json:"password"`
+	EmailCode string `json:"email_code"`
+}
+
+type EmailCodeRequest struct {
+	Email   string `json:"email"`
+	Purpose string `json:"purpose"`
+}
+
+type EmailCodeResponse struct {
+	Sent             bool `json:"sent"`
+	ExpiresInSeconds int  `json:"expires_in_seconds"`
+	CooldownSeconds  int  `json:"cooldown_seconds"`
 }
 
 type AuthResponse struct {
@@ -58,6 +79,55 @@ type AuthResponse struct {
 	AdminUser sqlc.User `json:"admin_user"`
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (s *Service) SendEmailCode(ctx context.Context, req EmailCodeRequest) (EmailCodeResponse, error) {
+	email, err := normalizeEmail(req.Email)
+	if err != nil {
+		return EmailCodeResponse{}, err
+	}
+	purpose := defaultString(req.Purpose, emailPurposeRegister)
+	if purpose != emailPurposeRegister {
+		return EmailCodeResponse{}, errors.New("unsupported email code purpose")
+	}
+	if _, err := s.store.Queries.GetUserByEmail(ctx, email); err == nil {
+		return EmailCodeResponse{}, ErrEmailAlreadyRegistered
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return EmailCodeResponse{}, err
+	}
+	if latest, err := s.store.Queries.GetLatestEmailVerification(ctx, email, purpose); err == nil {
+		if time.Since(latest.CreatedAt) < s.cfg.EmailCodeCooldown {
+			return EmailCodeResponse{}, ErrEmailCodeCooldown
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return EmailCodeResponse{}, err
+	}
+	code, err := randomNumericCode(6)
+	if err != nil {
+		return EmailCodeResponse{}, err
+	}
+	client := mailer.ResendClient{APIKey: s.cfg.ResendAPIKey, From: s.cfg.ResendFrom}
+	if err := client.SendVerificationCode(ctx, email, code, s.cfg.EmailCodeTTL); err != nil {
+		if errors.Is(err, mailer.ErrNotConfigured) {
+			return EmailCodeResponse{}, ErrEmailCodeNotConfigured
+		}
+		return EmailCodeResponse{}, err
+	}
+	_, err = s.store.Queries.CreateEmailVerification(ctx, sqlc.CreateEmailVerificationParams{
+		ID:        "evf_" + ksuid.New().String(),
+		Email:     email,
+		Purpose:   purpose,
+		CodeHash:  emailCodeHash(email, purpose, code),
+		ExpiresAt: time.Now().Add(s.cfg.EmailCodeTTL),
+	})
+	if err != nil {
+		return EmailCodeResponse{}, err
+	}
+	return EmailCodeResponse{
+		Sent:             true,
+		ExpiresInSeconds: int(s.cfg.EmailCodeTTL.Seconds()),
+		CooldownSeconds:  int(s.cfg.EmailCodeCooldown.Seconds()),
+	}, nil
 }
 
 func (s *Service) RegisterAdmin(ctx context.Context, req AuthRequest) (AuthResponse, error) {
@@ -68,12 +138,20 @@ func (s *Service) RegisterAdmin(ctx context.Context, req AuthRequest) (AuthRespo
 	if len(req.Password) < 8 {
 		return AuthResponse{}, errors.New("password must be at least 8 characters")
 	}
+	if _, err := s.store.Queries.GetUserByEmail(ctx, email); err == nil {
+		return AuthResponse{}, ErrEmailAlreadyRegistered
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return AuthResponse{}, err
+	}
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return AuthResponse{}, err
 	}
 	var user sqlc.User
 	err = s.store.WithTx(ctx, func(q *sqlc.Queries) error {
+		if err := verifyEmailCode(ctx, q, email, emailPurposeRegister, req.EmailCode, s.cfg.EmailCodeMaxAttempts); err != nil {
+			return err
+		}
 		if err := q.LockOverlayIPAllocator(ctx); err != nil {
 			return err
 		}
@@ -1405,6 +1483,58 @@ func capabilitiesForPlan(code string) AccountCapabilities {
 func tokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+func emailCodeHash(email, purpose, code string) string {
+	sum := sha256.Sum256([]byte(email + "|" + purpose + "|" + code))
+	return hex.EncodeToString(sum[:])
+}
+
+func verifyEmailCode(ctx context.Context, q *sqlc.Queries, email, purpose, code string, maxAttempts int32) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return ErrEmailCodeInvalid
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = 5
+	}
+	verification, err := q.GetLatestEmailVerification(ctx, email, purpose)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrEmailCodeInvalid
+		}
+		return err
+	}
+	if verification.ConsumedAt != nil {
+		return ErrEmailCodeInvalid
+	}
+	if time.Now().After(verification.ExpiresAt) {
+		return ErrEmailCodeExpired
+	}
+	if verification.AttemptCount >= maxAttempts {
+		return ErrEmailCodeTooManyAttempts
+	}
+	if verification.CodeHash != emailCodeHash(email, purpose, code) {
+		_ = q.IncrementEmailVerificationAttempts(ctx, verification.ID)
+		return ErrEmailCodeInvalid
+	}
+	return q.ConsumeEmailVerification(ctx, verification.ID)
+}
+
+func randomNumericCode(length int) (string, error) {
+	if length <= 0 {
+		length = 6
+	}
+	max := big.NewInt(10)
+	var b strings.Builder
+	for i := 0; i < length; i++ {
+		n, err := rand.Int(rand.Reader, max)
+		if err != nil {
+			return "", err
+		}
+		_, _ = fmt.Fprintf(&b, "%d", n.Int64())
+	}
+	return b.String(), nil
 }
 
 func randomToken(prefix string) (string, error) {

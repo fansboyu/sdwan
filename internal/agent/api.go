@@ -53,6 +53,8 @@ type PollRequest struct {
 	OSVersion            string           `json:"os_version"`
 	Endpoints            []EndpointReport `json:"endpoints"`
 	AdvertiseRoutes      []string         `json:"advertise_routes"`
+	PeerStats            []PeerStat       `json:"peer_stats,omitempty"`
+	AppliedPaths         []AppliedPath    `json:"applied_paths,omitempty"`
 }
 
 type PollResponse struct {
@@ -64,11 +66,14 @@ type PollResponse struct {
 }
 
 type Netmap struct {
-	Version       int64        `json:"version"`
-	OverlayCIDR   string       `json:"overlay_cidr"`
-	Self          NetmapSelf   `json:"self"`
-	Peers         []NetmapPeer `json:"peers"`
-	BootstrapPeer *NetmapPeer  `json:"bootstrap_peer,omitempty"`
+	Version         int64            `json:"version"`
+	OverlayCIDR     string           `json:"overlay_cidr"`
+	Self            NetmapSelf       `json:"self"`
+	Peers           []NetmapPeer     `json:"peers"`
+	BootstrapPeer   *NetmapPeer      `json:"bootstrap_peer,omitempty"`
+	PathMode        string           `json:"path_mode"`
+	PathGeneration  int64            `json:"path_generation"`
+	PathAssignments []PathAssignment `json:"path_assignments,omitempty"`
 }
 
 type NetmapSelf struct {
@@ -87,6 +92,26 @@ type NetmapPeer struct {
 	AllowedIPs          []string `json:"allowed_ips"`
 	Endpoints           []string `json:"endpoints"`
 	PersistentKeepalive int      `json:"persistent_keepalive"`
+	PathRole            string   `json:"path_role,omitempty"`
+	PathActive          bool     `json:"path_active,omitempty"`
+}
+
+type PeerStat struct {
+	PublicKey       string     `json:"public_key"`
+	LatestHandshake *time.Time `json:"latest_handshake_at,omitempty"`
+	RxBytes         int64      `json:"rx_bytes"`
+	TxBytes         int64      `json:"tx_bytes"`
+}
+
+type AppliedPath struct {
+	ClientDeviceID string `json:"client_device_id"`
+	Generation     int64  `json:"generation"`
+}
+type PathAssignment struct {
+	ClientDeviceID string `json:"client_device_id"`
+	DesiredPath    string `json:"desired_path"`
+	State          string `json:"state"`
+	Generation     int64  `json:"generation"`
 }
 
 func (c *APIClient) Register(ctx context.Context, req RegisterRequest) (RegisterResponse, error) {

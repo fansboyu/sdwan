@@ -11,6 +11,7 @@ type User struct {
 	MaxDevices    int32     `json:"max_devices"`
 	NetmapVersion int64     `json:"netmap_version"`
 	RelayMode     bool      `json:"relay_mode"`
+	PathMode      string    `json:"path_mode"`
 	Status        string    `json:"status"`
 	CreatedAt     time.Time `json:"created_at"`
 }
@@ -104,4 +105,26 @@ type Relay struct {
 	Status     string     `json:"status"`
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
+}
+
+type PeerPath struct {
+	UserID           string    `json:"user_id"`
+	ClientDeviceID   string    `json:"client_device_id"`
+	MainSiteDeviceID string    `json:"main_site_device_id"`
+	CurrentPath      string    `json:"current_path"`
+	DesiredPath      string    `json:"desired_path"`
+	State            string    `json:"state"`
+	Generation       int64     `json:"generation"`
+	SwitchedAt       time.Time `json:"switched_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type DevicePeerStat struct {
+	DeviceID        string     `json:"device_id"`
+	PeerPublicKey   string     `json:"peer_public_key"`
+	LatestHandshake *time.Time `json:"latest_handshake_at,omitempty"`
+	RxBytes         int64      `json:"rx_bytes"`
+	TxBytes         int64      `json:"tx_bytes"`
+	LastRxAt        *time.Time `json:"last_rx_at,omitempty"`
+	ReportedAt      time.Time  `json:"reported_at"`
 }

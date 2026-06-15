@@ -33,33 +33,33 @@ type CreateUserParams struct {
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, `INSERT INTO users (id, email, password_hash, overlay_cidr, max_devices)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, status, created_at`,
+RETURNING id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at`,
 		arg.ID, arg.Email, arg.PasswordHash, arg.OverlayCidr, arg.MaxDevices)
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.Status, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
 	return u, err
 }
 
 func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
-	row := q.db.QueryRow(ctx, `SELECT id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, status, created_at
+	row := q.db.QueryRow(ctx, `SELECT id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at
 FROM users
 WHERE id = $1`, id)
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.Status, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
 	return u, err
 }
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
-	row := q.db.QueryRow(ctx, `SELECT id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, status, created_at
+	row := q.db.QueryRow(ctx, `SELECT id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at
 FROM users
 WHERE email = $1`, email)
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.Status, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
 	return u, err
 }
 
 func (q *Queries) GetUserBySessionTokenHash(ctx context.Context, tokenHash string) (User, error) {
-	row := q.db.QueryRow(ctx, `SELECT u.id, u.email, u.password_hash, u.plan_code, u.overlay_cidr::text, u.max_devices, u.netmap_version, u.relay_mode, u.status, u.created_at
+	row := q.db.QueryRow(ctx, `SELECT u.id, u.email, u.password_hash, u.plan_code, u.overlay_cidr::text, u.max_devices, u.netmap_version, u.relay_mode, u.path_mode, u.status, u.created_at
 FROM admin_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1
@@ -67,7 +67,7 @@ WHERE s.token_hash = $1
   AND s.expires_at > now()
   AND u.status = 'active'`, tokenHash)
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.Status, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
 	return u, err
 }
 
@@ -93,7 +93,7 @@ func (q *Queries) UpdateUserPlan(ctx context.Context, userID, planCode string) e
 }
 
 func (q *Queries) UpdateUserRelayMode(ctx context.Context, userID string, enabled bool) error {
-	_, err := q.db.Exec(ctx, `UPDATE users SET relay_mode = $2 WHERE id = $1`, userID, enabled)
+	_, err := q.db.Exec(ctx, `UPDATE users SET relay_mode = $2, path_mode = CASE WHEN $2 THEN 'relay' ELSE 'direct' END WHERE id = $1`, userID, enabled)
 	return err
 }
 

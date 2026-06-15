@@ -476,12 +476,12 @@ async function disableRelay(relay) {
   await loadDashboard()
 }
 
-async function setRelayMode(enabled) {
+async function setPathMode(mode) {
   error.value = ''
-  const response = await fetch(`${apiBase}/admin/relay-mode`, {
+  const response = await fetch(`${apiBase}/admin/path-mode`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify({ mode }),
   })
   if (response.status === 401) {
     logout()
@@ -489,7 +489,7 @@ async function setRelayMode(enabled) {
   }
   if (!response.ok) {
     const payload = await readPayload(response)
-    error.value = payload.error || 'Relay 模式切换失败'
+    error.value = payload.error || '连接模式切换失败'
     return
   }
   await loadMe()
@@ -706,21 +706,27 @@ onMounted(async () => {
       <section class="panel" v-if="account">
         <div class="section-title">
           <div>
-            <h2>Relay 模式</h2>
-            <p>启用后客户端只连接 Relay peer，适合 P2P 打不通或需要稳定中转的网络。</p>
+            <h2>连接路径</h2>
+            <p>自动模式优先直连；直连连续异常 30 秒后按客户端切换到 Relay，恢复后自动回直连。</p>
           </div>
-          <button
-            type="button"
-            :disabled="!account.capabilities.enable_self_relay || !account.active_relay"
-            @click="setRelayMode(!account.user.relay_mode)"
-          >
-            {{ account.user.relay_mode ? '关闭 Relay 模式' : '开启 Relay 模式' }}
-          </button>
+          <span class="badge" :class="{ primary: account.relay_healthy }">
+            {{ account.relay_healthy ? 'Relay 在线' : 'Relay 离线' }}
+          </span>
         </div>
 
-        <div class="main-site">
-          <span>当前模式</span>
-          <strong>{{ account.user.relay_mode ? 'Relay 中转' : 'Hub/P2P' }}</strong>
+        <div class="path-mode-switch">
+          <button type="button" :class="{ active: account.user.path_mode === 'direct' }" @click="setPathMode('direct')">直连</button>
+          <button type="button" :class="{ active: account.user.path_mode === 'auto' }" :disabled="!account.relay_healthy" @click="setPathMode('auto')">自动中继</button>
+          <button type="button" :class="{ active: account.user.path_mode === 'relay' }" :disabled="!account.relay_healthy" @click="setPathMode('relay')">强制中继</button>
+        </div>
+
+        <div class="path-list" v-if="(account.peer_paths || []).length">
+          <div class="path-item" v-for="path in account.peer_paths" :key="path.client_device_id">
+            <span>{{ deviceLabel(path.client_device_id) }}</span>
+            <strong>{{ path.current_path }} → {{ path.desired_path }}</strong>
+            <span class="badge">{{ path.state }}</span>
+            <small>generation {{ path.generation }} · {{ formatTime(path.updated_at) }}</small>
+          </div>
         </div>
 
         <form class="relay-form" @submit.prevent="createRelay">
@@ -756,6 +762,7 @@ onMounted(async () => {
               <span class="badge" :class="{ primary: relay.status === 'active' }">
                 {{ relay.status }}
               </span>
+              <small>{{ formatTime(relay.last_seen_at) }}</small>
             </span>
             <span class="row-actions">
               <button class="small" type="button" :disabled="relay.status === 'active'" @click="enableRelay(relay)">

@@ -525,6 +525,41 @@ code {
   margin-bottom: 14px;
 }
 
+.path-mode-switch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #111827;
+  margin-bottom: 18px;
+}
+
+.path-mode-switch button {
+  background: transparent;
+  color: #94a3b8;
+}
+
+.path-mode-switch button.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.path-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.path-item {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 130px 150px minmax(180px, auto);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #263244;
+}
+
 .clickable-row:hover {
   background: #f8fbff;
   cursor: pointer;

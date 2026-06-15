@@ -1,12 +1,24 @@
 # SD-WAN Controller
 
-`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.1.9`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent、子网路由和免费升级业务逻辑。
+`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.2.0`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent、子网路由和免费升级业务逻辑。
 
 生产默认控制器域名：
 
 ```text
 controller.englishlisten.cn
 ```
+
+## 架构文档
+
+按服务和客户端拆分的详细说明见 [docs/architecture/README.md](docs/architecture/README.md)：
+
+- [控制器服务](docs/architecture/server-controller.md)
+- [发现服务](docs/architecture/server-discovery.md)
+- [中继服务](docs/architecture/server-relay.md)
+- [Linux 客户端](docs/architecture/client-linux.md)
+- [Windows 客户端](docs/architecture/client-windows.md)
+
+完整部署步骤见 [docs/deployment.md](docs/deployment.md)。
 
 ## 当前定位
 
@@ -20,7 +32,7 @@ controller.englishlisten.cn
 - 同账号设备默认互通。
 - Endpoint 由 Agent 上报和 Bootstrap/Relay 侧观察，控制端每设备每类型保留最近 3 个。
 
-暂不包含 ACL、MagicDNS、Exit Node、真实支付、审计日志、多 Controller 高可用和 DERP 风格自动 fallback。
+暂不包含 ACL、MagicDNS、Exit Node、真实支付、审计日志、多 Controller 高可用和公共多租户 Relay。
 
 ## 功能模块
 
@@ -30,7 +42,7 @@ controller.englishlisten.cn
 - 用户注册、登录、账号状态、订阅状态
 - 设备注册、心跳、Endpoint 上报、Netmap 下发
 - 子网路由审批和下发
-- Relay 节点管理和 Relay 模式开关
+- Relay 节点管理、健康校验和按客户端路径状态机
 - 数据库 migration 自动执行
 
 ### Web 管理台
@@ -41,6 +53,8 @@ controller.englishlisten.cn
 - 子网路由审批
 - 套餐升级和免费升级入口
 - Relay 节点创建、启用、禁用
+- 直连、自动中继、强制中继三种连接模式
+- 每个客户端当前路径、目标路径和 generation 展示
 
 ### Linux Agent
 
@@ -50,6 +64,7 @@ controller.englishlisten.cn
 - 首次启动使用 `wg-quick up`
 - 后续配置变更使用 `wg syncconf` 和路由差异同步，减少中断
 - 支持 Linux 子网网关命令，开启 `ip_forward` 和 iptables 转发/NAT 规则
+- 每 5 秒采集 WireGuard 握手与收发字节，参与自动 fallback
 
 ### Windows Agent
 
@@ -58,6 +73,7 @@ controller.englishlisten.cn
 - 支持注册、连接、断开、诊断
 - 按 Netmap 计算实际需要的路由，不再默认固定写入 `100.64.0.0/10`
 - 使用 `last_routes` 做路由差异同步和清理
+- 使用 wireguard-go UAPI 无中断切换 AllowedIPs 并上报路径状态
 
 ### Bootstrap Agent
 
@@ -72,7 +88,8 @@ controller.englishlisten.cn
 - 拉取控制端下发的 Relay peer 列表
 - 维护 `sdwan-relay` WireGuard 接口
 - 上报 Relay 心跳
-- 当前 Relay 模式采用账号级开关：开启后客户端主要连接 Relay，由 Relay 允许同账号全网互通
+- Relay 节点启用与业务流量模式完全分离
+- 自动模式按“客户端—主站点”链路独立 fallback
 
 ## 套餐逻辑
 
@@ -99,14 +116,15 @@ controller.englishlisten.cn
 - 控制台审批后，客户端收到对应子网路由。
 - 主节点机器本身仍需要开启系统转发和必要 NAT。
 
-### Relay 模式
+### 自动 Relay fallback
 
-账号开启 Relay 模式后：
+`v1.2.0` 支持三种账户路径模式：
 
-- 客户端 Netmap 优先下发 Relay peer。
-- 客户端通过 Relay 访问同账号 Overlay 设备。
-- 当前策略是 Relay 模式下允许全网互通。
-- `relay` 套餐包含 `subnet`，因此仍可使用已审批的子网路由。
+- `direct`：只使用主站点与客户端直连。
+- `auto`：优先直连；连续 30 秒无有效握手后切 Relay，Relay 最少驻留 60 秒，直连连续恢复 30 秒后切回。
+- `relay`：强制所有客户端与主站点通过活动 Relay 通信。
+
+切换按客户端独立执行。直连和 Relay Peer 会同时保留用于探测，但同一业务 AllowedIPs 始终只属于当前目标路径。自动和强制模式要求活动 Relay 最近 15 秒内有心跳，并要求所有活动客户端至少为 `v1.2.0`。
 
 ## 架构图
 
@@ -416,7 +434,7 @@ docker compose build
 - Controller 使用独立 PostgreSQL 或 Compose PostgreSQL
 - Web 通过 Caddy/Nginx 反向代理
 - 下载文件建议放在 `/downloads/<version>/`
-- Linux Agent 安装脚本默认使用 `SDWAN_VERSION=v1.1.9`
+- Linux Agent 安装脚本默认使用 `SDWAN_VERSION=v1.2.0`
 - Controller 需要配置强随机 `ADMIN_JWT_SECRET`
 - Bootstrap 和 Relay Token 必须独立生成并妥善保存
 
@@ -425,8 +443,8 @@ docker compose build
 - 暂无 ACL，账号内设备默认互通。
 - 暂无 MagicDNS。
 - 暂无 Exit Node。
-- Relay 当前是账号级手动开关，不是自动按连接质量 fallback。
-- Relay 健康检查和容量调度仍是基础版本。
+- 自动 fallback 当前只支持单主站点和单活动自建 Relay。
+- Relay 健康检查基于心跳；尚无容量、地域和多 Relay 调度。
 - Windows 端暂未实现子网网关能力。
 - 支付逻辑暂未接入真实支付渠道。
 - 审计日志字段预留但未完整产品化。

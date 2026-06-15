@@ -1,20 +1,20 @@
 -- name: CreateUser :one
 INSERT INTO users (id, email, password_hash, overlay_cidr, max_devices)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, status, created_at;
+RETURNING id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at;
 
 -- name: GetUser :one
-SELECT id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, status, created_at
+SELECT id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at
 FROM users
 WHERE id = $1;
 
 -- name: GetUserByEmail :one
-SELECT id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, status, created_at
+SELECT id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at
 FROM users
 WHERE email = $1;
 
 -- name: GetUserBySessionTokenHash :one
-SELECT u.id, u.email, u.password_hash, u.plan_code, u.overlay_cidr::text, u.max_devices, u.netmap_version, u.status, u.created_at
+SELECT u.id, u.email, u.password_hash, u.plan_code, u.overlay_cidr::text, u.max_devices, u.netmap_version, u.relay_mode, u.path_mode, u.status, u.created_at
 FROM admin_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1

@@ -38,7 +38,7 @@ func Load() Config {
 		Version:                   version.Version,
 		ControllerURL:             getenv("CONTROLLER_URL", "https://controller.englishlisten.cn"),
 		DefaultMaxDevices:         int32(getenvInt("DEFAULT_MAX_DEVICES", 254)),
-		DefaultPollInterval:       time.Duration(getenvInt("POLL_INTERVAL_SECONDS", 15)) * time.Second,
+		DefaultPollInterval:       time.Duration(getenvInt("POLL_INTERVAL_SECONDS", 5)) * time.Second,
 		MinSupportedClientVersion: getenv("MIN_SUPPORTED_CLIENT_VERSION", version.Version),
 		LatestClientVersion:       getenv("LATEST_CLIENT_VERSION", version.Version),
 		BootstrapPublicKey:        getenv("BOOTSTRAP_WG_PUBLIC_KEY", ""),

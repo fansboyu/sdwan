@@ -77,7 +77,9 @@ func writePeer(b *strings.Builder, peer NetmapPeer) {
 	b.WriteString("[Peer]\n")
 	b.WriteString("# " + peer.Hostname + " " + peer.VirtualIP + "\n")
 	b.WriteString("PublicKey = " + peer.PublicKey + "\n")
-	if len(peer.AllowedIPs) == 0 {
+	if peer.PathRole != "" && !peer.PathActive {
+		// Keep the peer and endpoint for probing, but do not give it business routes.
+	} else if len(peer.AllowedIPs) == 0 {
 		b.WriteString("AllowedIPs = " + hostOnly(peer.VirtualIP) + "/32\n")
 	} else {
 		b.WriteString("AllowedIPs = " + strings.Join(peer.AllowedIPs, ", ") + "\n")

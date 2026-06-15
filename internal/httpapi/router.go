@@ -44,6 +44,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /admin/relays/{relayID}/enable", r.enableRelay)
 	r.mux.HandleFunc("POST /admin/relays/{relayID}/disable", r.disableRelay)
 	r.mux.HandleFunc("POST /admin/relay-mode", r.setRelayMode)
+	r.mux.HandleFunc("POST /admin/path-mode", r.setPathMode)
 	r.mux.HandleFunc("GET /admin/devices", r.listDevices)
 	r.mux.HandleFunc("GET /admin/devices/{deviceID}", r.getDeviceDetail)
 	r.mux.HandleFunc("POST /admin/devices/{deviceID}/main-site", r.setMainSite)
@@ -304,6 +305,30 @@ func (r *Router) setRelayMode(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"relay_mode": body.Enabled})
+}
+
+func (r *Router) setPathMode(w http.ResponseWriter, req *http.Request) {
+	user, err := r.svc.AdminFromToken(req.Context(), req.Header.Get("Authorization"))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	if err := readJSON(req, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := r.svc.SetPathMode(req.Context(), user, body.Mode); err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, app.ErrUpgradeRequired) {
+			status = http.StatusPaymentRequired
+		}
+		writeError(w, status, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"path_mode": body.Mode})
 }
 
 func (r *Router) listDevices(w http.ResponseWriter, req *http.Request) {

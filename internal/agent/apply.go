@@ -22,6 +22,9 @@ func DesiredRoutes(netmap Netmap) []string {
 }
 
 func peerAllowedIPs(peer NetmapPeer) []string {
+	if peer.PathRole != "" && !peer.PathActive {
+		return nil
+	}
 	if len(peer.AllowedIPs) > 0 {
 		return peer.AllowedIPs
 	}

@@ -397,6 +397,7 @@ type windowsServiceHandler struct {
 func (h *windowsServiceHandler) Execute(_ []string, r <-chan svc.ChangeRequest, s chan<- svc.Status) (bool, uint32) {
 	s <- svc.Status{State: svc.StartPending}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	runner := &serviceRunner{configPath: h.configPath, routeCIDR: h.routeCIDR}
 	errCh := make(chan error, 1)
 	go func() {
@@ -455,6 +456,7 @@ func (r *serviceRunner) RunOnce(ctx context.Context) error {
 	client := agent.NewAPIClient(cfg.ControllerURL)
 	detector := agent.EndpointDetector{Timeout: 3 * time.Second}
 	endpoints := detector.Detect(ctx, cfg)
+	peerStats := r.peerStats()
 
 	pollResp, err := client.Poll(ctx, cfg.DeviceToken, agent.PollRequest{
 		CurrentNetmapVersion: cfg.NetmapVersion,
@@ -462,6 +464,8 @@ func (r *serviceRunner) RunOnce(ctx context.Context) error {
 		OSVersion:            cfg.OSVersion,
 		Endpoints:            endpoints,
 		AdvertiseRoutes:      cfg.AdvertiseRoutes,
+		PeerStats:            peerStats,
+		AppliedPaths:         cfg.AppliedPaths,
 	})
 	if err != nil {
 		return err
@@ -482,6 +486,7 @@ func (r *serviceRunner) RunOnce(ctx context.Context) error {
 	}
 	cfg = appliedCfg
 	cfg.NetmapVersion = netmap.Version
+	cfg.AppliedPaths = windowsAppliedPaths(netmap.PathAssignments)
 	cfg.ClientVersion = version.Version
 	if err := agent.SaveConfig(r.configPath, cfg); err != nil {
 		return err
@@ -558,9 +563,30 @@ func (r *serviceRunner) isStarted() bool {
 func (r *serviceRunner) nextInterval() time.Duration {
 	cfg, err := agent.LoadConfig(r.configPath)
 	if err != nil || cfg.NetmapVersion == 0 {
-		return 15 * time.Second
+		return 5 * time.Second
 	}
-	return 15 * time.Second
+	return 5 * time.Second
+}
+
+func (r *serviceRunner) peerStats() []agent.PeerStat {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.dev == nil {
+		return nil
+	}
+	output, err := r.dev.IpcGet()
+	if err != nil {
+		return nil
+	}
+	return agent.ParseUAPIStats(output)
+}
+
+func windowsAppliedPaths(items []agent.PathAssignment) []agent.AppliedPath {
+	result := make([]agent.AppliedPath, 0, len(items))
+	for _, item := range items {
+		result = append(result, agent.AppliedPath{ClientDeviceID: item.ClientDeviceID, Generation: item.Generation})
+	}
+	return result
 }
 
 func renderUAPI(cfg agent.Config, netmap agent.Netmap) (string, error) {
@@ -635,6 +661,9 @@ func resolveEndpoint(endpoint string) (string, error) {
 }
 
 func peerAllowedIPs(peer agent.NetmapPeer) []string {
+	if peer.PathRole != "" && !peer.PathActive {
+		return nil
+	}
 	if len(peer.AllowedIPs) > 0 {
 		return peer.AllowedIPs
 	}

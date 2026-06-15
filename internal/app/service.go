@@ -244,6 +244,8 @@ type AccountSummary struct {
 	Subscription *sqlc.Subscription  `json:"subscription,omitempty"`
 	FreeUpgrade  FreeUpgradeSummary  `json:"free_upgrade"`
 	Capabilities AccountCapabilities `json:"capabilities"`
+	PeerPaths    []sqlc.PeerPath     `json:"peer_paths"`
+	RelayHealthy bool                `json:"relay_healthy"`
 }
 
 type FreeUpgradeSummary struct {
@@ -278,6 +280,10 @@ func (s *Service) AccountSummary(ctx context.Context, user sqlc.User) (AccountSu
 	if err != nil {
 		return AccountSummary{}, err
 	}
+	paths, err := s.store.Queries.ListPeerPathsByUser(ctx, user.ID)
+	if err != nil {
+		return AccountSummary{}, err
+	}
 	devices, err := s.store.Queries.ListDevicesByUser(ctx, user.ID)
 	if err != nil {
 		return AccountSummary{}, err
@@ -291,6 +297,8 @@ func (s *Service) AccountSummary(ctx context.Context, user sqlc.User) (AccountSu
 		}
 	}
 	user.PasswordHash = ""
+	active := activeRelay(relays)
+	healthy := active != nil && relayIsHealthy(*active)
 	return AccountSummary{
 		User:         user,
 		DeviceCount:  count,
@@ -298,10 +306,12 @@ func (s *Service) AccountSummary(ctx context.Context, user sqlc.User) (AccountSu
 		Plans:        plans,
 		SubnetRoutes: subnets,
 		Relays:       relays,
-		ActiveRelay:  activeRelay(relays),
+		ActiveRelay:  active,
 		Subscription: subscription,
 		FreeUpgrade:  freeUpgradeSummary(freeUsed),
 		Capabilities: capabilitiesForPlan(user.PlanCode),
+		PeerPaths:    paths,
+		RelayHealthy: healthy,
 	}, nil
 }
 
@@ -376,9 +386,6 @@ func (s *Service) EnableRelay(ctx context.Context, user sqlc.User, relayID strin
 			return err
 		}
 		relay = updated
-		if err := q.UpdateUserRelayMode(ctx, user.ID, true); err != nil {
-			return err
-		}
 		return q.BumpNetmapVersion(ctx, user.ID)
 	}); err != nil {
 		return sqlc.Relay{}, err
@@ -405,18 +412,11 @@ func (s *Service) DisableRelay(ctx context.Context, user sqlc.User, relayID stri
 }
 
 func (s *Service) SetRelayMode(ctx context.Context, user sqlc.User, enabled bool) error {
+	mode := pathModeDirect
 	if enabled {
-		if !capabilitiesForPlan(user.PlanCode).EnableSelfRelay {
-			return ErrUpgradeRequired
-		}
-		if _, err := s.store.Queries.GetActiveRelayByUser(ctx, user.ID); err != nil {
-			return err
-		}
+		mode = pathModeRelay
 	}
-	if err := s.store.Queries.UpdateUserRelayMode(ctx, user.ID, enabled); err != nil {
-		return err
-	}
-	return s.store.Queries.BumpNetmapVersion(ctx, user.ID)
+	return s.SetPathMode(ctx, user, mode)
 }
 
 type SubscriptionSummary struct {
@@ -729,11 +729,13 @@ type EndpointReport struct {
 }
 
 type PollRequest struct {
-	CurrentNetmapVersion int64            `json:"current_netmap_version"`
-	ClientVersion        string           `json:"client_version"`
-	OSVersion            string           `json:"os_version"`
-	Endpoints            []EndpointReport `json:"endpoints"`
-	AdvertiseRoutes      []string         `json:"advertise_routes,omitempty"`
+	CurrentNetmapVersion int64               `json:"current_netmap_version"`
+	ClientVersion        string              `json:"client_version"`
+	OSVersion            string              `json:"os_version"`
+	Endpoints            []EndpointReport    `json:"endpoints"`
+	AdvertiseRoutes      []string            `json:"advertise_routes,omitempty"`
+	PeerStats            []PeerStatReport    `json:"peer_stats,omitempty"`
+	AppliedPaths         []AppliedPathReport `json:"applied_paths,omitempty"`
 }
 
 type PollResponse struct {
@@ -758,6 +760,9 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 		return PollResponse{}, err
 	}
 	if err := s.store.Queries.UpdateDeviceHeartbeat(ctx, device.ID, defaultString(req.ClientVersion, device.ClientVersion), req.OSVersion); err != nil {
+		return PollResponse{}, err
+	}
+	if err := s.recordPathReports(ctx, device, req.PeerStats, req.AppliedPaths); err != nil {
 		return PollResponse{}, err
 	}
 	endpointChanged := false
@@ -809,6 +814,17 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 	user, err := s.store.Queries.GetUser(ctx, device.UserID)
 	if err != nil {
 		return PollResponse{}, err
+	}
+	if changed, err := s.reconcilePeerPaths(ctx, user); err != nil {
+		return PollResponse{}, err
+	} else if changed {
+		if err := s.store.Queries.BumpNetmapVersion(ctx, user.ID); err != nil {
+			return PollResponse{}, err
+		}
+		user, err = s.store.Queries.GetUser(ctx, device.UserID)
+		if err != nil {
+			return PollResponse{}, err
+		}
 	}
 	return PollResponse{
 		ServerTime:          time.Now().UTC(),
@@ -863,12 +879,15 @@ func (s *Service) syncAdvertisedSubnetRoutes(ctx context.Context, device sqlc.De
 }
 
 type Netmap struct {
-	Version       int64         `json:"version"`
-	OverlayCIDR   string        `json:"overlay_cidr"`
-	Self          NetmapSelf    `json:"self"`
-	Peers         []NetmapPeer  `json:"peers"`
-	BootstrapPeer *NetmapPeer   `json:"bootstrap_peer,omitempty"`
-	Relays        []interface{} `json:"relays"`
+	Version         int64            `json:"version"`
+	OverlayCIDR     string           `json:"overlay_cidr"`
+	Self            NetmapSelf       `json:"self"`
+	Peers           []NetmapPeer     `json:"peers"`
+	BootstrapPeer   *NetmapPeer      `json:"bootstrap_peer,omitempty"`
+	Relays          []interface{}    `json:"relays"`
+	PathMode        string           `json:"path_mode"`
+	PathGeneration  int64            `json:"path_generation"`
+	PathAssignments []PathAssignment `json:"path_assignments,omitempty"`
 }
 
 type NetmapSelf struct {
@@ -887,6 +906,8 @@ type NetmapPeer struct {
 	AllowedIPs          []string `json:"allowed_ips"`
 	Endpoints           []string `json:"endpoints"`
 	PersistentKeepalive int      `json:"persistent_keepalive"`
+	PathRole            string   `json:"path_role,omitempty"`
+	PathActive          bool     `json:"path_active,omitempty"`
 }
 
 func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
@@ -917,6 +938,12 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 	routesByDevice := map[string][]string{}
 	for _, route := range activeRoutes {
 		routesByDevice[route.DeviceID] = append(routesByDevice[route.DeviceID], route.Cidr)
+	}
+	if netmap, ok, err := s.pathAwareNetmap(ctx, user, self, devices, endpointsByDevice, routesByDevice, activeRoutes); err != nil {
+		return Netmap{}, err
+	} else if ok {
+		netmap.BootstrapPeer = s.bootstrapPeer()
+		return netmap, nil
 	}
 
 	if user.RelayMode && capabilitiesForPlan(user.PlanCode).EnableSelfRelay {

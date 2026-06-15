@@ -55,6 +55,7 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 
 	client := NewAPIClient(cfg.ControllerURL)
 	endpoints := detector.Detect(ctx, cfg)
+	peerStats, _ := CollectPeerStats(cfg.InterfaceName)
 
 	pollResp, err := client.Poll(ctx, cfg.DeviceToken, PollRequest{
 		CurrentNetmapVersion: cfg.NetmapVersion,
@@ -62,6 +63,8 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 		OSVersion:            cfg.OSVersion,
 		Endpoints:            endpoints,
 		AdvertiseRoutes:      cfg.AdvertiseRoutes,
+		PeerStats:            peerStats,
+		AppliedPaths:         cfg.AppliedPaths,
 	})
 	if err != nil {
 		return 0, err
@@ -105,6 +108,7 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 	}
 
 	cfg.NetmapVersion = netmap.Version
+	cfg.AppliedPaths = appliedPaths(netmap.PathAssignments)
 	cfg.LastConfigPath = filepath.Clean(opts.WGPath)
 	if err := SaveConfig(opts.ConfigPath, cfg); err != nil {
 		return interval, err
@@ -112,6 +116,14 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 	log.Printf("netmap applied: version=%d role=%s peers=%d endpoints=%d bootstrap=%v apply=%v",
 		netmap.Version, defaultString(netmap.Self.SiteRole, "client"), len(netmap.Peers), len(endpoints), netmap.BootstrapPeer != nil, opts.Apply)
 	return interval, nil
+}
+
+func appliedPaths(assignments []PathAssignment) []AppliedPath {
+	result := make([]AppliedPath, 0, len(assignments))
+	for _, item := range assignments {
+		result = append(result, AppliedPath{ClientDeviceID: item.ClientDeviceID, Generation: item.Generation})
+	}
+	return result
 }
 
 func defaultString(value, fallback string) string {

@@ -37,6 +37,34 @@ sdwan-windows-tray.ps1       旧 PowerShell 托盘
 
 当前优先使用 `sdwan-tray.exe + sdwan-service.exe`。
 
+## 推荐安装包
+
+普通用户不需要再手工复制三个文件。可使用 Inno Setup 构建单文件安装包：
+
+```text
+dist\windows\SD-WAN-Setup-v1.2.0-x64.exe
+```
+
+在项目根目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\windows\build-installer.ps1
+```
+
+安装包会：
+
+1. 请求管理员权限并检查 Windows x64。
+2. 安装到 `C:\Program Files\SD-WAN`。
+3. 停止并移除旧的 `SDWANService`，然后安装新服务。
+4. 保留 `C:\ProgramData\sdwan` 中已有的设备配置。
+5. 安装 `sdwan-service.exe`、`sdwan-tray.exe` 和 `wintun.dll`。
+6. 创建开始菜单快捷方式，并可选创建桌面和开机启动快捷方式。
+7. 安装完成后启动托盘，但不会在设备注册前启动后台隧道。
+
+用户入网流程保持不变：登录 Web 管理台，复制 Admin Token，在托盘中点击 `Join from Clipboard`，然后点击 `Connect`。
+
+卸载时会停止并移除 Windows Service，但默认保留 `C:\ProgramData\sdwan`，方便以后升级或重新安装。需要彻底清除设备身份时再手工删除该目录。
+
 ## 运行要求
 
 1. Windows 10/11 或 Windows Server。

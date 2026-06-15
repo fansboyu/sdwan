@@ -6,7 +6,7 @@ This file is for AI coding agents and human maintainers who need to understand t
 
 `sdwan` is a minimal Tailscale-like SD-WAN product.
 
-Current version: `v1.1.9`
+Current version: `v1.2.0`
 
 The project is currently an MVP with:
 
@@ -26,7 +26,7 @@ Controller manages identity, IP allocation, devices, netmap, and endpoints.
 Linux Agent manages local config and calls kernel WireGuard.
 kernel WireGuard handles encrypted packet transport.
 sdwan-bootstrap-agent observes real WireGuard endpoint from the public bootstrap server.
-Relay fallback is not implemented yet.
+Per-client automatic Relay fallback is implemented for the main-site topology.
 STUN endpoint probing has been removed.
 ```
 
@@ -75,7 +75,7 @@ Controller
 Linux Agent
   |
   | writes /etc/wireguard/sdwan0.conf
-  | runs wg-quick down/up
+  | uses wg syncconf, with wg-quick fallback
   v
 kernel WireGuard(sdwan0)
   |
@@ -358,7 +358,7 @@ cd /opt/sdwan
 git fetch --tags
 git reset --hard
 git clean -fd
-git checkout v1.1.9
+git checkout v1.2.0
 docker compose up -d --build controller web
 ```
 
@@ -537,9 +537,8 @@ sysctl -w net.ipv4.conf.sdwan-bootstrap.rp_filter=0
 
 ## Known Constraints
 
-- No Relay fallback yet.
-- No userspace WireGuard/magicsock.
-- No Windows Agent implementation yet.
+- Automatic fallback currently supports one main site and one active self-hosted Relay.
+- No userspace magicsock or public multi-tenant Relay.
 - No ACL or MagicDNS.
 - Bootstrap endpoint discovery improves accuracy but does not guarantee P2P for symmetric NAT.
 - Controller should not directly operate host WireGuard from Docker. Keep WireGuard control in `sdwan-bootstrap-agent` on the host.

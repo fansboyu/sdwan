@@ -48,13 +48,14 @@ type EndpointReport struct {
 }
 
 type PollRequest struct {
-	CurrentNetmapVersion int64            `json:"current_netmap_version"`
-	ClientVersion        string           `json:"client_version"`
-	OSVersion            string           `json:"os_version"`
-	Endpoints            []EndpointReport `json:"endpoints"`
-	AdvertiseRoutes      []string         `json:"advertise_routes"`
-	PeerStats            []PeerStat       `json:"peer_stats,omitempty"`
-	AppliedPaths         []AppliedPath    `json:"applied_paths,omitempty"`
+	CurrentNetmapVersion int64                 `json:"current_netmap_version"`
+	ClientVersion        string                `json:"client_version"`
+	OSVersion            string                `json:"os_version"`
+	Endpoints            []EndpointReport      `json:"endpoints"`
+	AdvertiseRoutes      []string              `json:"advertise_routes"`
+	SubnetGateways       []SubnetGatewayStatus `json:"subnet_gateways,omitempty"`
+	PeerStats            []PeerStat            `json:"peer_stats,omitempty"`
+	AppliedPaths         []AppliedPath         `json:"applied_paths,omitempty"`
 }
 
 type PollResponse struct {

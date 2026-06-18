@@ -1,11 +1,17 @@
 -- name: ListSubnetRoutesByUser :many
-SELECT id, user_id, device_id, cidr::text, status, advertised, approved, created_at, updated_at
+SELECT id, user_id, device_id, cidr::text, status, advertised, approved,
+       gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
+       gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
+       created_at, updated_at
 FROM subnet_routes
 WHERE user_id = $1
 ORDER BY created_at DESC;
 
 -- name: ListActiveSubnetRoutesByUser :many
-SELECT id, user_id, device_id, cidr::text, status, advertised, approved, created_at, updated_at
+SELECT id, user_id, device_id, cidr::text, status, advertised, approved,
+       gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
+       gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
+       created_at, updated_at
 FROM subnet_routes
 WHERE user_id = $1
   AND status = 'active'
@@ -29,6 +35,32 @@ WITH upserted AS (
   RETURNING 1
 )
 SELECT EXISTS(SELECT 1 FROM upserted) AS changed;
+
+-- name: UpdateSubnetGatewayStatus :one
+WITH updated AS (
+  UPDATE subnet_routes
+  SET gateway_enabled = $4,
+      gateway_error = $5,
+      gateway_checked_at = now(),
+      gateway_out_interface = $6,
+      gateway_route_interface = $7,
+      gateway_lan_target = $8,
+      gateway_lan_reachable = $9,
+      updated_at = now()
+  WHERE user_id = $1
+    AND device_id = $2
+    AND cidr = $3::cidr
+    AND (
+      gateway_enabled IS DISTINCT FROM $4
+      OR gateway_error IS DISTINCT FROM $5
+      OR gateway_out_interface IS DISTINCT FROM $6
+      OR gateway_route_interface IS DISTINCT FROM $7
+      OR gateway_lan_target IS DISTINCT FROM $8
+      OR gateway_lan_reachable IS DISTINCT FROM $9
+    )
+  RETURNING 1
+)
+SELECT EXISTS(SELECT 1 FROM updated);
 
 -- name: DisableDeviceSubnetRoutesNotIn :execrows
 UPDATE subnet_routes
@@ -59,7 +91,10 @@ SET approved = $3,
     updated_at = now()
 WHERE id = $1
   AND user_id = $2
-RETURNING id, user_id, device_id, cidr::text, status, advertised, approved, created_at, updated_at;
+RETURNING id, user_id, device_id, cidr::text, status, advertised, approved,
+          gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
+          gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
+          created_at, updated_at;
 
 -- name: DisableSubnetRoute :one
 UPDATE subnet_routes
@@ -68,4 +103,7 @@ SET advertised = false,
     updated_at = now()
 WHERE id = $1
   AND user_id = $2
-RETURNING id, user_id, device_id, cidr::text, status, advertised, approved, created_at, updated_at;
+RETURNING id, user_id, device_id, cidr::text, status, advertised, approved,
+          gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
+          gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
+          created_at, updated_at;

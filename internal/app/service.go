@@ -694,6 +694,26 @@ func (s *Service) ApproveSubnetRoute(ctx context.Context, user sqlc.User, routeI
 	}
 	var route sqlc.SubnetRoute
 	if err := s.store.WithTx(ctx, func(q *sqlc.Queries) error {
+		if approved {
+			routes, err := q.ListSubnetRoutesByUser(ctx, user.ID)
+			if err != nil {
+				return err
+			}
+			var target *sqlc.SubnetRoute
+			for _, item := range routes {
+				if item.ID == routeID {
+					copy := item
+					target = &copy
+					break
+				}
+			}
+			if target == nil {
+				return pgx.ErrNoRows
+			}
+			if err := validateSubnetRouteAgainstExisting(target.Cidr, routeID, routes); err != nil {
+				return err
+			}
+		}
 		updated, err := q.SetSubnetRouteApproved(ctx, routeID, user.ID, approved)
 		if err != nil {
 			return err
@@ -729,13 +749,25 @@ type EndpointReport struct {
 }
 
 type PollRequest struct {
-	CurrentNetmapVersion int64               `json:"current_netmap_version"`
-	ClientVersion        string              `json:"client_version"`
-	OSVersion            string              `json:"os_version"`
-	Endpoints            []EndpointReport    `json:"endpoints"`
-	AdvertiseRoutes      []string            `json:"advertise_routes,omitempty"`
-	PeerStats            []PeerStatReport    `json:"peer_stats,omitempty"`
-	AppliedPaths         []AppliedPathReport `json:"applied_paths,omitempty"`
+	CurrentNetmapVersion int64                 `json:"current_netmap_version"`
+	ClientVersion        string                `json:"client_version"`
+	OSVersion            string                `json:"os_version"`
+	Endpoints            []EndpointReport      `json:"endpoints"`
+	AdvertiseRoutes      []string              `json:"advertise_routes,omitempty"`
+	SubnetGateways       []SubnetGatewayReport `json:"subnet_gateways,omitempty"`
+	PeerStats            []PeerStatReport      `json:"peer_stats,omitempty"`
+	AppliedPaths         []AppliedPathReport   `json:"applied_paths,omitempty"`
+}
+
+type SubnetGatewayReport struct {
+	LANCIDR                  string `json:"lan_cidr"`
+	Enabled                  bool   `json:"enabled"`
+	OutInterface             string `json:"out_interface"`
+	RouteInterface           string `json:"route_interface,omitempty"`
+	LANTarget                string `json:"lan_target,omitempty"`
+	LANTargetReachable       bool   `json:"lan_target_reachable"`
+	RouteMatchesOutInterface bool   `json:"route_matches_out_interface"`
+	Error                    string `json:"error,omitempty"`
 }
 
 type PollResponse struct {
@@ -811,6 +843,17 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 			}
 		}
 	}
+	if len(req.SubnetGateways) > 0 {
+		changed, err := s.recordSubnetGatewayReports(ctx, device, req.SubnetGateways)
+		if err != nil {
+			return PollResponse{}, err
+		}
+		if changed {
+			if err := s.store.Queries.BumpNetmapVersion(ctx, device.UserID); err != nil {
+				return PollResponse{}, err
+			}
+		}
+	}
 	user, err := s.store.Queries.GetUser(ctx, device.UserID)
 	if err != nil {
 		return PollResponse{}, err
@@ -857,6 +900,13 @@ func (s *Service) syncAdvertisedSubnetRoutes(ctx context.Context, device sqlc.De
 		if !capabilitiesForPlan(user.PlanCode).EnableSubnet {
 			return false, ErrUpgradeRequired
 		}
+		existing, err := s.store.Queries.ListSubnetRoutesByUser(ctx, device.UserID)
+		if err != nil {
+			return false, err
+		}
+		if err := validateAdvertisedSubnetRoutes(device.ID, normalized, existing); err != nil {
+			return false, err
+		}
 	}
 	changed := false
 	for _, cidr := range normalized {
@@ -876,6 +926,39 @@ func (s *Service) syncAdvertisedSubnetRoutes(ctx context.Context, device sqlc.De
 		return false, err
 	}
 	return changed || deleted > 0, nil
+}
+
+func (s *Service) recordSubnetGatewayReports(ctx context.Context, device sqlc.Device, reports []SubnetGatewayReport) (bool, error) {
+	changed := false
+	for _, report := range reports {
+		routes, err := normalizeSubnetRoutes([]string{report.LANCIDR})
+		if err != nil {
+			continue
+		}
+		if len(routes) == 0 {
+			continue
+		}
+		errorText := strings.TrimSpace(report.Error)
+		if errorText == "" && !report.RouteMatchesOutInterface {
+			errorText = "route uses a different LAN interface"
+		}
+		updated, err := s.store.Queries.UpdateSubnetGatewayStatus(ctx, sqlc.UpdateSubnetGatewayStatusParams{
+			UserID:                device.UserID,
+			DeviceID:              device.ID,
+			Cidr:                  routes[0],
+			GatewayEnabled:        report.Enabled,
+			GatewayError:          errorText,
+			GatewayOutInterface:   strings.TrimSpace(report.OutInterface),
+			GatewayRouteInterface: strings.TrimSpace(report.RouteInterface),
+			GatewayLANTarget:      strings.TrimSpace(report.LANTarget),
+			GatewayLANReachable:   report.LANTargetReachable,
+		})
+		if err != nil {
+			return false, err
+		}
+		changed = changed || updated
+	}
+	return changed, nil
 }
 
 type Netmap struct {
@@ -1336,6 +1419,7 @@ func normalizeSubnetRoutes(routes []string) ([]string, error) {
 	seen := map[string]bool{}
 	result := make([]string, 0, len(routes))
 	overlay, _ := netip.ParsePrefix(globalBaseCIDR)
+	reserved, _ := netip.ParsePrefix("100.64.0.0/10")
 	for _, route := range routes {
 		route = strings.TrimSpace(route)
 		if route == "" {
@@ -1355,6 +1439,9 @@ func normalizeSubnetRoutes(routes []string) ([]string, error) {
 		if prefixesOverlap(prefix, overlay) {
 			return nil, errors.New("subnet route cannot overlap overlay cidr " + globalBaseCIDR)
 		}
+		if prefixesOverlap(prefix, reserved) {
+			return nil, errors.New("subnet route cannot overlap carrier-grade NAT/Tailscale range 100.64.0.0/10")
+		}
 		normalized := prefix.String()
 		if seen[normalized] {
 			continue
@@ -1364,6 +1451,53 @@ func normalizeSubnetRoutes(routes []string) ([]string, error) {
 	}
 	sort.Strings(result)
 	return result, nil
+}
+
+func validateAdvertisedSubnetRoutes(deviceID string, cidrs []string, existing []sqlc.SubnetRoute) error {
+	for i, cidr := range cidrs {
+		for j := i + 1; j < len(cidrs); j++ {
+			if subnetCIDRsOverlap(cidr, cidrs[j]) {
+				return fmt.Errorf("subnet route %s overlaps %s", cidr, cidrs[j])
+			}
+		}
+		if err := validateSubnetRouteAgainstExisting(cidr, "", filterSubnetRoutes(existing, func(route sqlc.SubnetRoute) bool {
+			return route.Advertised && route.DeviceID != deviceID
+		})); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSubnetRouteAgainstExisting(cidr, routeID string, existing []sqlc.SubnetRoute) error {
+	for _, route := range existing {
+		if route.ID == routeID || !route.Advertised {
+			continue
+		}
+		if subnetCIDRsOverlap(cidr, route.Cidr) {
+			return fmt.Errorf("subnet route %s overlaps existing route %s on device %s", cidr, route.Cidr, route.DeviceID)
+		}
+	}
+	return nil
+}
+
+func filterSubnetRoutes(routes []sqlc.SubnetRoute, keep func(sqlc.SubnetRoute) bool) []sqlc.SubnetRoute {
+	result := make([]sqlc.SubnetRoute, 0, len(routes))
+	for _, route := range routes {
+		if keep(route) {
+			result = append(result, route)
+		}
+	}
+	return result
+}
+
+func subnetCIDRsOverlap(left, right string) bool {
+	leftPrefix, leftErr := netip.ParsePrefix(left)
+	rightPrefix, rightErr := netip.ParsePrefix(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return prefixesOverlap(leftPrefix.Masked(), rightPrefix.Masked())
 }
 
 func dedupeStrings(values []string) []string {

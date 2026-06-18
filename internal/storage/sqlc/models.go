@@ -84,15 +84,22 @@ type DeviceEndpoint struct {
 }
 
 type SubnetRoute struct {
-	ID         string    `json:"id"`
-	UserID     string    `json:"user_id"`
-	DeviceID   string    `json:"device_id"`
-	Cidr       string    `json:"cidr"`
-	Status     string    `json:"status"`
-	Advertised bool      `json:"advertised"`
-	Approved   bool      `json:"approved"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID                    string     `json:"id"`
+	UserID                string     `json:"user_id"`
+	DeviceID              string     `json:"device_id"`
+	Cidr                  string     `json:"cidr"`
+	Status                string     `json:"status"`
+	Advertised            bool       `json:"advertised"`
+	Approved              bool       `json:"approved"`
+	GatewayEnabled        bool       `json:"gateway_enabled"`
+	GatewayError          string     `json:"gateway_error"`
+	GatewayCheckedAt      *time.Time `json:"gateway_checked_at,omitempty"`
+	GatewayOutInterface   string     `json:"gateway_out_interface"`
+	GatewayRouteInterface string     `json:"gateway_route_interface"`
+	GatewayLANTarget      string     `json:"gateway_lan_target"`
+	GatewayLANReachable   bool       `json:"gateway_lan_reachable"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
 type Relay struct {

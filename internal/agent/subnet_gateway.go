@@ -12,23 +12,30 @@ type SubnetGatewayOptions struct {
 	OutInterface string `json:"out_interface"`
 	WGInterface  string `json:"wg_interface"`
 	OverlayCIDR  string `json:"overlay_cidr"`
+	LANTarget    string `json:"lan_target,omitempty"`
 }
 
 type SubnetGatewayStatus struct {
-	Supported           bool   `json:"supported"`
-	Enabled             bool   `json:"enabled"`
-	IPForward           bool   `json:"ip_forward"`
-	PersistentSysctl    bool   `json:"persistent_sysctl"`
-	NATRule             bool   `json:"nat_rule"`
-	ForwardToLANRule    bool   `json:"forward_to_lan_rule"`
-	ForwardFromLANRule  bool   `json:"forward_from_lan_rule"`
-	WireGuardInterface  bool   `json:"wireguard_interface"`
-	OutInterfacePresent bool   `json:"out_interface_present"`
-	LANCIDR             string `json:"lan_cidr"`
-	OutInterface        string `json:"out_interface"`
-	WGInterface         string `json:"wg_interface"`
-	OverlayCIDR         string `json:"overlay_cidr"`
-	Error               string `json:"error,omitempty"`
+	Supported                bool     `json:"supported"`
+	Enabled                  bool     `json:"enabled"`
+	IPForward                bool     `json:"ip_forward"`
+	PersistentSysctl         bool     `json:"persistent_sysctl"`
+	NATRule                  bool     `json:"nat_rule"`
+	ForwardToLANRule         bool     `json:"forward_to_lan_rule"`
+	ForwardFromLANRule       bool     `json:"forward_from_lan_rule"`
+	WireGuardInterface       bool     `json:"wireguard_interface"`
+	OutInterfacePresent      bool     `json:"out_interface_present"`
+	RouteMatchesOutInterface bool     `json:"route_matches_out_interface"`
+	LANTargetReachable       bool     `json:"lan_target_reachable"`
+	LANCIDR                  string   `json:"lan_cidr"`
+	OutInterface             string   `json:"out_interface"`
+	SuggestedOutInterface    string   `json:"suggested_out_interface,omitempty"`
+	RouteInterface           string   `json:"route_interface,omitempty"`
+	LANTarget                string   `json:"lan_target,omitempty"`
+	WGInterface              string   `json:"wg_interface"`
+	OverlayCIDR              string   `json:"overlay_cidr"`
+	Warnings                 []string `json:"warnings,omitempty"`
+	Error                    string   `json:"error,omitempty"`
 }
 
 func (o SubnetGatewayOptions) withDefaults() SubnetGatewayOptions {

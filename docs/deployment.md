@@ -541,11 +541,10 @@ sudo sdwan-agent routes add 192.168.50.0/24
 
 ```bash
 sudo sdwan-agent subnet-gateway enable \
-  --lan-cidr 192.168.50.0/24 \
-  --out-interface eth0
+  --lan-cidr 192.168.50.0/24
 ```
 
-`--out-interface` 应填写实际连接 LAN 的接口。
+`--out-interface` 可省略，Agent 会根据到 LAN 探测目标的系统路由自动推断；也可以显式填写实际连接 LAN 的接口。默认探测目标为 LAN CIDR 的第一个可用地址，也可通过 `--lan-target 192.168.50.1` 指定网关或稳定在线的内网主机。
 
 ## 7. Windows 客户端部署
 

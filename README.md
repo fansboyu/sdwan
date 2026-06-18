@@ -330,14 +330,15 @@ sudo sdwan-agent routes remove 192.168.50.0/24
 
 ```bash
 sudo sdwan-agent subnet-gateway enable \
-  --lan-cidr 192.168.50.0/24 \
-  --out-interface eth0
+  --lan-cidr 192.168.50.0/24
 ```
+
+`--out-interface` 可省略，Agent 会根据到 LAN 探测目标的系统路由自动推断；也可显式指定，例如 `--out-interface eth0`。默认探测目标为 LAN CIDR 的第一个可用地址，也可用 `--lan-target 192.168.50.1` 指定网关或稳定在线的内网主机。
 
 查看或关闭：
 
 ```bash
-sudo sdwan-agent subnet-gateway status
+sudo sdwan-agent subnet-gateway status --lan-cidr 192.168.50.0/24
 sudo sdwan-agent subnet-gateway disable --lan-cidr 192.168.50.0/24
 ```
 

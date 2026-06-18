@@ -142,12 +142,13 @@ sudo sdwan-agent routes remove 192.168.50.0/24
 
 ```bash
 sudo sdwan-agent subnet-gateway enable \
-  --lan-cidr 192.168.50.0/24 \
-  --out-interface eth0
+  --lan-cidr 192.168.50.0/24
 ```
 
 该命令会：
 
+- 自动推断 LAN 出口接口；也可通过 `--out-interface eth0` 显式指定。
+- 探测 LAN 目标；默认是 CIDR 的第一个可用地址，也可通过 `--lan-target 192.168.50.1` 指定。
 - 开启 IPv4 forwarding。
 - 写入持久化 sysctl 配置。
 - 增加 overlay 到 LAN 的 MASQUERADE。
@@ -158,13 +159,13 @@ sudo sdwan-agent subnet-gateway enable \
 
 ```bash
 sudo sdwan-agent subnet-gateway status \
-  --lan-cidr 192.168.50.0/24 \
-  --out-interface eth0
+  --lan-cidr 192.168.50.0/24
 
 sudo sdwan-agent subnet-gateway disable \
-  --lan-cidr 192.168.50.0/24 \
-  --out-interface eth0
+  --lan-cidr 192.168.50.0/24
 ```
+
+状态会持续上报到 Controller。管理台会展示网关是否启用、出口接口、系统实际路由接口、LAN 探测目标是否可达和最近错误。若 LAN 网关禁止 ICMP，`lan_target_reachable` 可能为 false，可改用 `--lan-target` 指向稳定响应 ping 的内网主机。
 
 ## 8. 常用命令
 

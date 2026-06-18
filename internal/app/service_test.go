@@ -92,3 +92,29 @@ func TestNormalizeSubnetRoutesRejectsOverlayCIDR(t *testing.T) {
 		t.Fatal("expected default route to be rejected")
 	}
 }
+
+func TestValidateAdvertisedSubnetRoutesRejectsSameAccountOverlap(t *testing.T) {
+	existing := []sqlc.SubnetRoute{{
+		ID:         "srt_existing",
+		DeviceID:   "dev_main",
+		Cidr:       "192.168.1.0/24",
+		Advertised: true,
+	}}
+	err := validateAdvertisedSubnetRoutes("dev_other", []string{"192.168.1.128/25"}, existing)
+	if err == nil {
+		t.Fatal("expected overlapping route from another device to be rejected")
+	}
+}
+
+func TestValidateAdvertisedSubnetRoutesAllowsSameDeviceReplacement(t *testing.T) {
+	existing := []sqlc.SubnetRoute{{
+		ID:         "srt_existing",
+		DeviceID:   "dev_main",
+		Cidr:       "192.168.1.0/24",
+		Advertised: true,
+	}}
+	err := validateAdvertisedSubnetRoutes("dev_main", []string{"192.168.1.0/24"}, existing)
+	if err != nil {
+		t.Fatalf("expected same device exact route to remain allowed: %v", err)
+	}
+}

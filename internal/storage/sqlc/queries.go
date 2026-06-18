@@ -495,7 +495,10 @@ ORDER BY updated_at DESC`, deviceID)
 }
 
 func (q *Queries) ListSubnetRoutesByUser(ctx context.Context, userID string) ([]SubnetRoute, error) {
-	rows, err := q.db.Query(ctx, `SELECT id, user_id, device_id, cidr::text, status, advertised, approved, created_at, updated_at
+	rows, err := q.db.Query(ctx, `SELECT id, user_id, device_id, cidr::text, status, advertised, approved,
+       gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
+       gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
+       created_at, updated_at
 FROM subnet_routes
 WHERE user_id = $1
 ORDER BY created_at DESC`, userID)
@@ -506,7 +509,7 @@ ORDER BY created_at DESC`, userID)
 	var items []SubnetRoute
 	for rows.Next() {
 		var r SubnetRoute
-		if err := rows.Scan(&r.ID, &r.UserID, &r.DeviceID, &r.Cidr, &r.Status, &r.Advertised, &r.Approved, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := scanSubnetRoute(rows, &r); err != nil {
 			return nil, err
 		}
 		items = append(items, r)
@@ -515,7 +518,10 @@ ORDER BY created_at DESC`, userID)
 }
 
 func (q *Queries) ListActiveSubnetRoutesByUser(ctx context.Context, userID string) ([]SubnetRoute, error) {
-	rows, err := q.db.Query(ctx, `SELECT id, user_id, device_id, cidr::text, status, advertised, approved, created_at, updated_at
+	rows, err := q.db.Query(ctx, `SELECT id, user_id, device_id, cidr::text, status, advertised, approved,
+       gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
+       gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
+       created_at, updated_at
 FROM subnet_routes
 WHERE user_id = $1
   AND status = 'active'
@@ -529,7 +535,7 @@ ORDER BY cidr ASC`, userID)
 	var items []SubnetRoute
 	for rows.Next() {
 		var r SubnetRoute
-		if err := rows.Scan(&r.ID, &r.UserID, &r.DeviceID, &r.Cidr, &r.Status, &r.Advertised, &r.Approved, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := scanSubnetRoute(rows, &r); err != nil {
 			return nil, err
 		}
 		items = append(items, r)
@@ -560,6 +566,48 @@ func (q *Queries) UpsertAdvertisedSubnetRoute(ctx context.Context, arg UpsertAdv
   RETURNING 1
 )
 SELECT EXISTS(SELECT 1 FROM upserted) AS changed`, arg.ID, arg.UserID, arg.DeviceID, arg.Cidr)
+	var changed bool
+	err := row.Scan(&changed)
+	return changed, err
+}
+
+type UpdateSubnetGatewayStatusParams struct {
+	UserID                string
+	DeviceID              string
+	Cidr                  string
+	GatewayEnabled        bool
+	GatewayError          string
+	GatewayOutInterface   string
+	GatewayRouteInterface string
+	GatewayLANTarget      string
+	GatewayLANReachable   bool
+}
+
+func (q *Queries) UpdateSubnetGatewayStatus(ctx context.Context, arg UpdateSubnetGatewayStatusParams) (bool, error) {
+	row := q.db.QueryRow(ctx, `WITH updated AS (
+  UPDATE subnet_routes
+  SET gateway_enabled = $4,
+      gateway_error = $5,
+      gateway_checked_at = now(),
+      gateway_out_interface = $6,
+      gateway_route_interface = $7,
+      gateway_lan_target = $8,
+      gateway_lan_reachable = $9,
+      updated_at = now()
+  WHERE user_id = $1
+    AND device_id = $2
+    AND cidr = $3::cidr
+    AND (
+      gateway_enabled IS DISTINCT FROM $4
+      OR gateway_error IS DISTINCT FROM $5
+      OR gateway_out_interface IS DISTINCT FROM $6
+      OR gateway_route_interface IS DISTINCT FROM $7
+      OR gateway_lan_target IS DISTINCT FROM $8
+      OR gateway_lan_reachable IS DISTINCT FROM $9
+    )
+  RETURNING 1
+)
+SELECT EXISTS(SELECT 1 FROM updated)`, arg.UserID, arg.DeviceID, arg.Cidr, arg.GatewayEnabled, arg.GatewayError, arg.GatewayOutInterface, arg.GatewayRouteInterface, arg.GatewayLANTarget, arg.GatewayLANReachable)
 	var changed bool
 	err := row.Scan(&changed)
 	return changed, err
@@ -604,9 +652,12 @@ SET approved = $3,
     updated_at = now()
 WHERE id = $1
   AND user_id = $2
-RETURNING id, user_id, device_id, cidr::text, status, advertised, approved, created_at, updated_at`, id, userID, approved)
+RETURNING id, user_id, device_id, cidr::text, status, advertised, approved,
+          gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
+          gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
+          created_at, updated_at`, id, userID, approved)
 	var r SubnetRoute
-	err := row.Scan(&r.ID, &r.UserID, &r.DeviceID, &r.Cidr, &r.Status, &r.Advertised, &r.Approved, &r.CreatedAt, &r.UpdatedAt)
+	err := scanSubnetRouteRow(row, &r)
 	return r, err
 }
 
@@ -617,10 +668,42 @@ SET advertised = false,
     updated_at = now()
 WHERE id = $1
   AND user_id = $2
-RETURNING id, user_id, device_id, cidr::text, status, advertised, approved, created_at, updated_at`, id, userID)
+RETURNING id, user_id, device_id, cidr::text, status, advertised, approved,
+          gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
+          gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
+          created_at, updated_at`, id, userID)
 	var r SubnetRoute
-	err := row.Scan(&r.ID, &r.UserID, &r.DeviceID, &r.Cidr, &r.Status, &r.Advertised, &r.Approved, &r.CreatedAt, &r.UpdatedAt)
+	err := scanSubnetRouteRow(row, &r)
 	return r, err
+}
+
+type subnetRouteScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanSubnetRoute(rows pgx.Rows, r *SubnetRoute) error {
+	return scanSubnetRouteRow(rows, r)
+}
+
+func scanSubnetRouteRow(row subnetRouteScanner, r *SubnetRoute) error {
+	return row.Scan(
+		&r.ID,
+		&r.UserID,
+		&r.DeviceID,
+		&r.Cidr,
+		&r.Status,
+		&r.Advertised,
+		&r.Approved,
+		&r.GatewayEnabled,
+		&r.GatewayError,
+		&r.GatewayCheckedAt,
+		&r.GatewayOutInterface,
+		&r.GatewayRouteInterface,
+		&r.GatewayLANTarget,
+		&r.GatewayLANReachable,
+		&r.CreatedAt,
+		&r.UpdatedAt,
+	)
 }
 
 func (q *Queries) ListRelaysByUser(ctx context.Context, userID string) ([]Relay, error) {

@@ -10,12 +10,13 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
 func EnableSubnetGateway(opts SubnetGatewayOptions) (SubnetGatewayStatus, error) {
-	opts = opts.withDefaults()
-	if err := validateSubnetGatewayOptions(opts); err != nil {
+	opts, prepStatus, err := prepareSubnetGatewayOptions(opts)
+	if err != nil {
 		return statusWithError(opts, err), err
 	}
 	if os.Geteuid() != 0 {
@@ -38,12 +39,16 @@ func EnableSubnetGateway(opts SubnetGatewayOptions) (SubnetGatewayStatus, error)
 			return statusWithError(opts, err), err
 		}
 	}
-	return CheckSubnetGatewayStatus(opts)
+	status, err := CheckSubnetGatewayStatus(opts)
+	if len(prepStatus.Warnings) > 0 {
+		status.Warnings = append(prepStatus.Warnings, status.Warnings...)
+	}
+	return status, err
 }
 
 func DisableSubnetGateway(opts SubnetGatewayOptions) (SubnetGatewayStatus, error) {
-	opts = opts.withDefaults()
-	if err := validateSubnetGatewayOptions(opts); err != nil {
+	opts, _, err := prepareSubnetGatewayOptions(opts)
+	if err != nil {
 		return statusWithError(opts, err), err
 	}
 	if os.Geteuid() != 0 {
@@ -63,18 +68,29 @@ func DisableSubnetGateway(opts SubnetGatewayOptions) (SubnetGatewayStatus, error
 }
 
 func CheckSubnetGatewayStatus(opts SubnetGatewayOptions) (SubnetGatewayStatus, error) {
-	opts = opts.withDefaults()
-	status := SubnetGatewayStatus{
-		Supported:    true,
-		LANCIDR:      opts.LANCIDR,
-		OutInterface: opts.OutInterface,
-		WGInterface:  opts.WGInterface,
-		OverlayCIDR:  opts.OverlayCIDR,
-	}
-	if err := validateSubnetGatewayOptions(opts); err != nil {
+	opts, status, err := prepareSubnetGatewayOptions(opts)
+	if err != nil {
 		status.Error = err.Error()
 		return status, err
 	}
+	status.Supported = true
+	status.LANCIDR = opts.LANCIDR
+	status.OutInterface = opts.OutInterface
+	status.WGInterface = opts.WGInterface
+	status.OverlayCIDR = opts.OverlayCIDR
+	status.LANTarget = opts.LANTarget
+	status.SuggestedOutInterface = status.RouteInterface
+	if status.SuggestedOutInterface == status.OutInterface {
+		status.SuggestedOutInterface = ""
+	}
+	status.RouteMatchesOutInterface = status.RouteInterface != "" && status.RouteInterface == opts.OutInterface
+
+	if reachable, err := pingIPv4(opts.LANTarget); err == nil {
+		status.LANTargetReachable = reachable
+	} else {
+		status.Warnings = append(status.Warnings, err.Error())
+	}
+
 	status.IPForward = readTrimmed("/proc/sys/net/ipv4/ip_forward") == "1"
 	status.PersistentSysctl = readTrimmed(subnetGatewaySysctlPath) == strings.TrimSpace(subnetGatewaySysctlContent)
 	status.WireGuardInterface = interfaceExists(opts.WGInterface)
@@ -88,7 +104,16 @@ func CheckSubnetGatewayStatus(opts SubnetGatewayOptions) (SubnetGatewayStatus, e
 		status.PersistentSysctl &&
 		status.NATRule &&
 		status.ForwardToLANRule &&
-		status.ForwardFromLANRule
+		status.ForwardFromLANRule &&
+		status.OutInterfacePresent &&
+		status.WireGuardInterface &&
+		status.RouteMatchesOutInterface
+	if !status.RouteMatchesOutInterface {
+		status.Warnings = append(status.Warnings, fmt.Sprintf("route to %s uses %s, not %s", opts.LANTarget, status.RouteInterface, opts.OutInterface))
+	}
+	if !status.LANTargetReachable {
+		status.Warnings = append(status.Warnings, fmt.Sprintf("LAN target %s did not respond to ping", opts.LANTarget))
+	}
 	return status, nil
 }
 
@@ -173,9 +198,6 @@ func validateSubnetGatewayOptions(opts SubnetGatewayOptions) error {
 	if strings.TrimSpace(opts.LANCIDR) == "" {
 		return errors.New("--lan-cidr is required")
 	}
-	if strings.TrimSpace(opts.OutInterface) == "" {
-		return errors.New("--out-interface is required")
-	}
 	if strings.TrimSpace(opts.WGInterface) == "" {
 		return errors.New("--wg-interface is required")
 	}
@@ -190,7 +212,94 @@ func validateSubnetGatewayOptions(opts SubnetGatewayOptions) error {
 	if prefixesOverlap(lan, overlay) {
 		return errors.New("--lan-cidr cannot overlap --overlay-cidr")
 	}
+	if strings.TrimSpace(opts.LANTarget) != "" {
+		target, err := netip.ParseAddr(strings.TrimSpace(opts.LANTarget))
+		if err != nil || !target.Is4() {
+			return errors.New("--lan-target must be an IPv4 address")
+		}
+		if !lan.Contains(target) {
+			return errors.New("--lan-target must be inside --lan-cidr")
+		}
+	}
 	return nil
+}
+
+func prepareSubnetGatewayOptions(opts SubnetGatewayOptions) (SubnetGatewayOptions, SubnetGatewayStatus, error) {
+	opts = opts.withDefaults()
+	status := SubnetGatewayStatus{
+		Supported:    true,
+		LANCIDR:      opts.LANCIDR,
+		OutInterface: opts.OutInterface,
+		WGInterface:  opts.WGInterface,
+		OverlayCIDR:  opts.OverlayCIDR,
+		LANTarget:    opts.LANTarget,
+	}
+	if err := validateSubnetGatewayOptions(opts); err != nil {
+		return opts, status, err
+	}
+	lan, _ := parseIPv4Prefix(opts.LANCIDR, "--lan-cidr")
+	if strings.TrimSpace(opts.LANTarget) == "" {
+		opts.LANTarget = defaultLANTarget(lan)
+		status.LANTarget = opts.LANTarget
+	}
+	if routeInterface, err := routeInterfaceFor(opts.LANTarget); err == nil {
+		status.RouteInterface = routeInterface
+		status.SuggestedOutInterface = routeInterface
+		if strings.TrimSpace(opts.OutInterface) == "" {
+			opts.OutInterface = routeInterface
+			status.OutInterface = opts.OutInterface
+		}
+	} else {
+		status.Warnings = append(status.Warnings, err.Error())
+	}
+	if strings.TrimSpace(opts.OutInterface) == "" {
+		return opts, status, errors.New("--out-interface is required when it cannot be inferred from --lan-cidr")
+	}
+	return opts, status, nil
+}
+
+func defaultLANTarget(prefix netip.Prefix) string {
+	addr := prefix.Addr()
+	if prefix.Bits() < 31 {
+		addr = addr.Next()
+	}
+	if !prefix.Contains(addr) {
+		addr = prefix.Addr()
+	}
+	return addr.String()
+}
+
+func routeInterfaceFor(target string) (string, error) {
+	if _, err := requireCommand("ip"); err != nil {
+		return "", err
+	}
+	cmd := exec.Command("ip", "-o", "route", "get", target)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		text := strings.TrimSpace(stderr.String())
+		if text == "" {
+			text = err.Error()
+		}
+		return "", fmt.Errorf("detect route to %s: %s", target, text)
+	}
+	match := regexp.MustCompile(`\bdev\s+(\S+)`).FindStringSubmatch(stdout.String())
+	if len(match) < 2 {
+		return "", fmt.Errorf("detect route to %s: output has no dev", target)
+	}
+	return match[1], nil
+}
+
+func pingIPv4(target string) (bool, error) {
+	if strings.TrimSpace(target) == "" {
+		return false, nil
+	}
+	if _, err := requireCommand("ping"); err != nil {
+		return false, err
+	}
+	err := exec.Command("ping", "-c", "1", "-W", "1", target).Run()
+	return err == nil, nil
 }
 
 func parseIPv4Prefix(value, name string) (netip.Prefix, error) {

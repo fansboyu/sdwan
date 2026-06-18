@@ -381,6 +381,26 @@ function deviceLabel(deviceID) {
   return `${device.hostname} / ${device.virtual_ip}`
 }
 
+function subnetGatewayLabel(route) {
+  if (!route.gateway_checked_at) return '未上报'
+  if (route.gateway_enabled && !route.gateway_error && route.gateway_lan_reachable) return '网关正常'
+  if (route.gateway_enabled) return '部分异常'
+  return '未启用'
+}
+
+function subnetGatewayDetail(route) {
+  const parts = []
+  if (route.gateway_out_interface) parts.push(`出口 ${route.gateway_out_interface}`)
+  if (route.gateway_route_interface && route.gateway_route_interface !== route.gateway_out_interface) {
+    parts.push(`实际 ${route.gateway_route_interface}`)
+  }
+  if (route.gateway_lan_target) {
+    parts.push(`${route.gateway_lan_target} ${route.gateway_lan_reachable ? '可达' : '不可达'}`)
+  }
+  if (route.gateway_error) parts.push(route.gateway_error)
+  return parts.join(' · ') || '等待主站点上报 subnet-gateway 状态'
+}
+
 async function approveSubnetRoute(route, approved) {
   error.value = ''
   const response = await fetch(`${apiBase}/admin/subnet-routes/${route.id}/approval`, {
@@ -663,6 +683,7 @@ onMounted(async () => {
             <span>CIDR</span>
             <span>发布设备</span>
             <span>状态</span>
+            <span>网关诊断</span>
             <span>最近更新</span>
             <span>{{ t('actions') }}</span>
           </div>
@@ -676,6 +697,15 @@ onMounted(async () => {
               <span class="badge" :class="{ primary: route.status === 'active' }">
                 {{ route.status }} / {{ route.approved ? '已批准' : '待批准' }}
               </span>
+            </span>
+            <span class="route-health">
+              <span
+                class="badge"
+                :class="{ primary: route.gateway_enabled && !route.gateway_error && route.gateway_lan_reachable, warn: route.gateway_error || (route.gateway_checked_at && (!route.gateway_enabled || !route.gateway_lan_reachable)) }"
+              >
+                {{ subnetGatewayLabel(route) }}
+              </span>
+              <small>{{ subnetGatewayDetail(route) }}</small>
             </span>
             <span>{{ formatTime(route.updated_at) }}</span>
             <span class="row-actions">

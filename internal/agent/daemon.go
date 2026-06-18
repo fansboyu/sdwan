@@ -56,6 +56,7 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 	client := NewAPIClient(cfg.ControllerURL)
 	endpoints := detector.Detect(ctx, cfg)
 	peerStats, _ := CollectPeerStats(cfg.InterfaceName)
+	subnetGateways := collectSubnetGatewayStatuses(cfg)
 
 	pollResp, err := client.Poll(ctx, cfg.DeviceToken, PollRequest{
 		CurrentNetmapVersion: cfg.NetmapVersion,
@@ -63,6 +64,7 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 		OSVersion:            cfg.OSVersion,
 		Endpoints:            endpoints,
 		AdvertiseRoutes:      cfg.AdvertiseRoutes,
+		SubnetGateways:       subnetGateways,
 		PeerStats:            peerStats,
 		AppliedPaths:         cfg.AppliedPaths,
 	})
@@ -116,6 +118,21 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 	log.Printf("netmap applied: version=%d role=%s peers=%d endpoints=%d bootstrap=%v apply=%v",
 		netmap.Version, defaultString(netmap.Self.SiteRole, "client"), len(netmap.Peers), len(endpoints), netmap.BootstrapPeer != nil, opts.Apply)
 	return interval, nil
+}
+
+func collectSubnetGatewayStatuses(cfg Config) []SubnetGatewayStatus {
+	items := make([]SubnetGatewayStatus, 0, len(cfg.SubnetGateways))
+	for _, opts := range cfg.SubnetGateways {
+		if opts.WGInterface == "" {
+			opts.WGInterface = cfg.InterfaceName
+		}
+		status, err := CheckSubnetGatewayStatus(opts)
+		if err != nil && status.Error == "" {
+			status.Error = err.Error()
+		}
+		items = append(items, status)
+	}
+	return items
 }
 
 func appliedPaths(assignments []PathAssignment) []AppliedPath {

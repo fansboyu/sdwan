@@ -506,7 +506,24 @@ code {
 
 .route-row {
   align-items: center;
-  grid-template-columns: 1fr 1.2fr 170px 1.1fr 270px;
+  grid-template-columns: 0.9fr 1.1fr 150px minmax(230px, 1.4fr) 1fr 270px;
+}
+
+.route-health {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.route-health small {
+  color: #627084;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.badge.warn {
+  background: #fff4d7;
+  color: #9a5b00;
 }
 
 .relay-row {

@@ -21,24 +21,25 @@ const (
 )
 
 type Config struct {
-	ControllerURL   string        `json:"controller_url"`
-	DeviceID        string        `json:"device_id"`
-	DeviceToken     string        `json:"device_token"`
-	Hostname        string        `json:"hostname"`
-	OS              string        `json:"os"`
-	Arch            string        `json:"arch"`
-	OSVersion       string        `json:"os_version"`
-	ClientVersion   string        `json:"client_version"`
-	PrivateKey      string        `json:"private_key"`
-	PublicKey       string        `json:"public_key"`
-	VirtualIP       string        `json:"virtual_ip"`
-	NetmapVersion   int64         `json:"netmap_version"`
-	InterfaceName   string        `json:"interface_name"`
-	ListenPort      int           `json:"listen_port"`
-	LastConfigPath  string        `json:"last_config_path"`
-	LastRoutes      []string      `json:"last_routes,omitempty"`
-	AdvertiseRoutes []string      `json:"advertise_routes,omitempty"`
-	AppliedPaths    []AppliedPath `json:"applied_paths,omitempty"`
+	ControllerURL   string                 `json:"controller_url"`
+	DeviceID        string                 `json:"device_id"`
+	DeviceToken     string                 `json:"device_token"`
+	Hostname        string                 `json:"hostname"`
+	OS              string                 `json:"os"`
+	Arch            string                 `json:"arch"`
+	OSVersion       string                 `json:"os_version"`
+	ClientVersion   string                 `json:"client_version"`
+	PrivateKey      string                 `json:"private_key"`
+	PublicKey       string                 `json:"public_key"`
+	VirtualIP       string                 `json:"virtual_ip"`
+	NetmapVersion   int64                  `json:"netmap_version"`
+	InterfaceName   string                 `json:"interface_name"`
+	ListenPort      int                    `json:"listen_port"`
+	LastConfigPath  string                 `json:"last_config_path"`
+	LastRoutes      []string               `json:"last_routes,omitempty"`
+	AdvertiseRoutes []string               `json:"advertise_routes,omitempty"`
+	SubnetGateways  []SubnetGatewayOptions `json:"subnet_gateways,omitempty"`
+	AppliedPaths    []AppliedPath          `json:"applied_paths,omitempty"`
 }
 
 func LoadConfig(path string) (Config, error) {

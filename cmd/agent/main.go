@@ -267,35 +267,45 @@ func runSubnetGateway(args []string) error {
 	}
 }
 
-func subnetGatewayFlagSet(name string, args []string) (agent.SubnetGatewayOptions, error) {
+func subnetGatewayFlagSet(name string, args []string) (agent.SubnetGatewayOptions, string, error) {
 	fs := flag.NewFlagSet("subnet-gateway "+name, flag.ExitOnError)
+	configPath := fs.String("config", agent.DefaultConfigPath, "agent config path")
 	lanCIDR := fs.String("lan-cidr", "", "LAN subnet CIDR to expose, for example 192.168.50.0/24")
-	outInterface := fs.String("out-interface", "", "LAN-facing output interface, for example eth0")
+	outInterface := fs.String("out-interface", "", "LAN-facing output interface, for example eth0; inferred from --lan-cidr when omitted")
+	lanTarget := fs.String("lan-target", "", "optional LAN IP to test, for example 192.168.50.1")
 	wgInterface := fs.String("wg-interface", agent.DefaultInterface, "SD-WAN WireGuard interface")
 	overlayCIDR := fs.String("overlay-cidr", agent.DefaultOverlayCIDR, "SD-WAN overlay CIDR")
 	if err := fs.Parse(args); err != nil {
-		return agent.SubnetGatewayOptions{}, err
+		return agent.SubnetGatewayOptions{}, "", err
 	}
 	return agent.SubnetGatewayOptions{
 		LANCIDR:      *lanCIDR,
 		OutInterface: *outInterface,
+		LANTarget:    *lanTarget,
 		WGInterface:  *wgInterface,
 		OverlayCIDR:  *overlayCIDR,
-	}, nil
+	}, *configPath, nil
 }
 
 func runSubnetGatewayEnable(args []string) error {
-	opts, err := subnetGatewayFlagSet("enable", args)
+	opts, configPath, err := subnetGatewayFlagSet("enable", args)
 	if err != nil {
 		return err
 	}
 	status, err := agent.EnableSubnetGateway(opts)
+	if err == nil {
+		if configErr := saveSubnetGatewayConfig(configPath, status); configErr != nil {
+			status.Error = "gateway enabled, but failed to save agent config: " + configErr.Error()
+			printJSON(status)
+			return configErr
+		}
+	}
 	printJSON(status)
 	return err
 }
 
 func runSubnetGatewayStatus(args []string) error {
-	opts, err := subnetGatewayFlagSet("status", args)
+	opts, _, err := subnetGatewayFlagSet("status", args)
 	if err != nil {
 		return err
 	}
@@ -305,13 +315,70 @@ func runSubnetGatewayStatus(args []string) error {
 }
 
 func runSubnetGatewayDisable(args []string) error {
-	opts, err := subnetGatewayFlagSet("disable", args)
+	opts, configPath, err := subnetGatewayFlagSet("disable", args)
 	if err != nil {
 		return err
 	}
 	status, err := agent.DisableSubnetGateway(opts)
+	if err == nil {
+		if configErr := removeSubnetGatewayConfig(configPath, status.LANCIDR); configErr != nil {
+			status.Error = "gateway disabled, but failed to save agent config: " + configErr.Error()
+			printJSON(status)
+			return configErr
+		}
+	}
 	printJSON(status)
 	return err
+}
+
+func saveSubnetGatewayConfig(configPath string, status agent.SubnetGatewayStatus) error {
+	cfg, err := agent.LoadConfig(configPath)
+	if err != nil {
+		return err
+	}
+	opts := agent.SubnetGatewayOptions{
+		LANCIDR:      status.LANCIDR,
+		OutInterface: status.OutInterface,
+		WGInterface:  status.WGInterface,
+		OverlayCIDR:  status.OverlayCIDR,
+		LANTarget:    status.LANTarget,
+	}
+	cfg.AdvertiseRoutes = normalizeRouteList(append(cfg.AdvertiseRoutes, status.LANCIDR))
+	upserted := false
+	for i, item := range cfg.SubnetGateways {
+		if item.LANCIDR == status.LANCIDR {
+			cfg.SubnetGateways[i] = opts
+			upserted = true
+			break
+		}
+	}
+	if !upserted {
+		cfg.SubnetGateways = append(cfg.SubnetGateways, opts)
+	}
+	return agent.SaveConfig(configPath, cfg)
+}
+
+func removeSubnetGatewayConfig(configPath, cidr string) error {
+	cfg, err := agent.LoadConfig(configPath)
+	if err != nil {
+		return err
+	}
+	var gateways []agent.SubnetGatewayOptions
+	for _, item := range cfg.SubnetGateways {
+		if item.LANCIDR != cidr {
+			gateways = append(gateways, item)
+		}
+	}
+	cfg.SubnetGateways = gateways
+	remove := map[string]bool{cidr: true}
+	var routes []string
+	for _, route := range normalizeRouteList(cfg.AdvertiseRoutes) {
+		if !remove[route] {
+			routes = append(routes, route)
+		}
+	}
+	cfg.AdvertiseRoutes = routes
+	return agent.SaveConfig(configPath, cfg)
 }
 
 func runRoutes(args []string) error {

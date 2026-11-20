@@ -11,6 +11,8 @@ import (
 
 type Config struct {
 	DatabaseURL               string
+	PlatformEmail             string
+	PlatformPasswordHash      string
 	ListenAddr                string
 	LogLevel                  slog.Level
 	Version                   string
@@ -32,6 +34,8 @@ type Config struct {
 
 func Load() Config {
 	return Config{
+		PlatformEmail:             os.Getenv("PLATFORM_EMAIL"),
+		PlatformPasswordHash:      os.Getenv("PLATFORM_PASSWORD_HASH"),
 		DatabaseURL:               getenv("DATABASE_URL", "postgres://sdwan:sdwan@localhost:5432/sdwan?sslmode=disable"),
 		ListenAddr:                getenv("LISTEN_ADDR", ":8080"),
 		LogLevel:                  parseLogLevel(getenv("LOG_LEVEL", "info")),

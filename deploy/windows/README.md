@@ -53,7 +53,7 @@ sdwan-windows-tray.ps1       旧 PowerShell 托盘
 普通用户不需要再手工复制三个文件。可使用 Inno Setup 构建单文件安装包：
 
 ```text
-dist\windows\SD-WAN-Setup-v1.2.1-x64.exe
+dist\windows\SD-WAN-Setup-v1.2.2-x64.exe
 ```
 
 在项目根目录执行：

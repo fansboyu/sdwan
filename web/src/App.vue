@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
+import { ArrowLeftRight, Cable, GitFork, LayoutDashboard, Monitor, Moon, Network, Radio, RefreshCw, Settings, Sun } from '@lucide/vue'
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || ''
 const locale = ref(localStorage.getItem('locale') || 'zh')
@@ -19,21 +20,20 @@ const error = ref('')
 const showPlanModal = ref(false)
 const relayForm = ref({ name: '', public_key: '', endpoint: '', virtual_ip: '' })
 const relayToken = ref('')
-const relayInstallCommand = 'curl -fsSL https://controller.englishlisten.cn/downloads/v1.2.1/install-relay.sh | sudo sh'
+const relayInstallCommand = 'curl -fsSL https://controller.englishlisten.cn/downloads/v1.2.2/install-relay.sh | sudo sh'
 const activeView = ref('overview')
 const showAdminToken = ref(false)
 
 const enterpriseNavigation = [
-  { id: 'overview', label: '网络总览', symbol: '◫' },
-  { id: 'devices', label: '设备与站点', symbol: '▦' },
-  { id: 'routes', label: '子网路由', symbol: '↗' },
-  { id: 'paths', label: '连接路径', symbol: '⇄' },
-  { id: 'relays', label: 'Relay', symbol: '⌁' },
-  { id: 'settings', label: '企业设置', symbol: '⚙' },
+  { id: 'overview', label: '网络总览', icon: LayoutDashboard },
+  { id: 'devices', label: '设备与站点', icon: Monitor },
+  { id: 'routes', label: '子网路由', icon: GitFork },
+  { id: 'paths', label: '连接路径', icon: ArrowLeftRight },
+  { id: 'relays', label: 'Relay', icon: Radio },
+  { id: 'settings', label: '企业设置', icon: Settings },
 ]
 
 const pageMeta = {
-  platform: ['平台运营总控台', '跨企业租户、平台服务与部署状态'],
   overview: ['网络总览', '企业网络运行状态与关键链路'],
   devices: ['设备与站点', '管理当前网络中的设备和主站点'],
   routes: ['子网路由', '检查网关状态、审批 LAN 路由并查看服务探测'],
@@ -656,10 +656,10 @@ onMounted(async () => {
         <div class="console-actions">
           <span class="controller-health">企业管理端</span>
           <div class="theme-switch" role="group" aria-label="界面主题">
-            <button type="button" :class="{ selected: theme === 'dark' }" :aria-pressed="theme === 'dark'" aria-label="暗黑风格" title="暗黑风格" @click="setTheme('dark')">◐</button>
-            <button type="button" :class="{ selected: theme === 'light' }" :aria-pressed="theme === 'light'" aria-label="明亮风格" title="明亮风格" @click="setTheme('light')">☼</button>
+            <button type="button" :class="{ selected: theme === 'dark' }" :aria-pressed="theme === 'dark'" aria-label="暗黑风格" title="暗黑风格" @click="setTheme('dark')"><Moon :size="16" aria-hidden="true" /></button>
+            <button type="button" :class="{ selected: theme === 'light' }" :aria-pressed="theme === 'light'" aria-label="明亮风格" title="明亮风格" @click="setTheme('light')"><Sun :size="16" aria-hidden="true" /></button>
           </div>
-          <button class="console-icon-button" type="button" aria-label="刷新数据" title="刷新数据" @click="refreshDashboard">↻</button>
+          <button class="console-icon-button" type="button" aria-label="刷新数据" title="刷新数据" @click="refreshDashboard"><RefreshCw :size="18" aria-hidden="true" /></button>
           <button class="console-text-button" type="button" @click="toggleLocale">{{ t('switchLanguage') }}</button>
           <button class="user-menu" type="button" @click="logout"><span class="user-avatar">{{ user.email?.slice(0, 1).toUpperCase() }}</span><span>退出</span></button>
         </div>
@@ -669,12 +669,7 @@ onMounted(async () => {
         <aside class="console-sidebar" aria-label="企业管理导航">
           <p class="sidebar-caption">企业工作台</p>
           <button v-for="item in enterpriseNavigation" :key="item.id" class="console-nav-item" :class="{ active: activeView === item.id }" type="button" @click="navigate(item.id)">
-            <span class="nav-symbol" aria-hidden="true">{{ item.symbol }}</span>{{ item.label }}
-          </button>
-          <div class="sidebar-divider"></div>
-          <p class="sidebar-caption">平台管理</p>
-          <button class="console-nav-item platform-nav-item" :class="{ active: activeView === 'platform' }" type="button" @click="navigate('platform')">
-            <span class="nav-symbol" aria-hidden="true">▣</span><span>平台运营总控台</span><span class="lock-tag">预览</span>
+            <component :is="item.icon" class="nav-symbol" :size="19" aria-hidden="true" />{{ item.label }}
           </button>
           <div class="sidebar-network">
             <span class="network-dot"></span><span>企业网络</span>
@@ -686,40 +681,20 @@ onMounted(async () => {
           <header class="page-heading">
             <div><p class="page-eyebrow">{{ user.email }}</p><h1>{{ pageMeta[activeView][0] }}</h1><p class="page-description">{{ pageMeta[activeView][1] }}</p></div>
             <div class="page-heading-actions">
-              <span v-if="account && activeView !== 'platform'" class="sync-label">Netmap v{{ account.user.netmap_version }}</span>
+              <span v-if="account" class="sync-label">Netmap v{{ account.user.netmap_version }}</span>
               <button v-if="activeView === 'settings'" class="action-button primary" type="button" @click="showPlanModal = true">查看套餐</button>
             </div>
           </header>
 
           <p class="console-error" role="alert" v-if="error">{{ error }}</p>
 
-          <template v-if="activeView === 'platform'">
-            <div class="platform-preview-notice"><strong>平台级接口尚未接入</strong><span>当前后端没有平台管理员角色、企业租户集合和跨企业配额 API。此页面仅呈现目标布局，不展示虚构数据，也不开放管理操作。</span></div>
-            <div class="metric-grid">
-              <article class="metric-card"><span>企业租户</span><strong class="metric-state muted">未接入</strong><em>需要平台租户 API</em></article>
-              <article class="metric-card"><span>在线设备</span><strong class="metric-state muted">未接入</strong><em>需要跨租户聚合</em></article>
-              <article class="metric-card"><span>Relay 节点</span><strong class="metric-state muted">未接入</strong><em>需要平台级服务视图</em></article>
-              <article class="metric-card"><span>平台告警</span><strong class="metric-state muted">未接入</strong><em>需要告警与审计服务</em></article>
-            </div>
-            <section class="content-section">
-              <div class="section-heading"><div><h2>企业租户</h2><p>平台管理员将从此处创建企业、设置资源配额并查看服务状态。</p></div><button class="action-button" type="button" disabled>创建企业</button></div>
-              <div class="data-table">
-                <div class="data-row platform-table-head"><span>企业</span><span>状态</span><span>设备配额</span><span>站点</span><span>套餐</span><span>最近活动</span></div>
-                <div class="table-empty">租户数据未连接。接入平台角色及租户 API 后，此处显示真实企业列表。</div>
-              </div>
-            </section>
-            <section class="content-section">
-              <div class="section-heading"><div><h2>平台服务</h2><p>Controller、数据库、Bootstrap 服务和 Relay 运行健康度。</p></div></div>
-              <div class="platform-services"><div><span class="service-mark">C</span><span><strong>Controller</strong><small>平台服务健康接口待接入</small></span></div><div><span class="service-mark db">DB</span><span><strong>PostgreSQL</strong><small>平台服务健康接口待接入</small></span></div><div><span class="service-mark relay">R</span><span><strong>Relay Fleet</strong><small>平台级状态汇总待接入</small></span></div></div>
-            </section>
-          </template>
 
           <template v-if="account && activeView === 'overview'">
             <div class="metric-grid">
-              <article class="metric-card"><span>设备节点</span><strong>{{ account.device_count }} <small>/ {{ account.user.max_devices }}</small></strong><em>当前企业网络</em></article>
-              <article class="metric-card"><span>Overlay 地址池</span><strong class="metric-code">{{ account.user.overlay_cidr }}</strong><em>企业专属网段</em></article>
-              <article class="metric-card"><span>已批准子网</span><strong>{{ (account.subnet_routes || []).filter((route) => route.approved && route.status === 'active').length }}</strong><em>{{ (account.subnet_routes || []).length }} 条已发布</em></article>
-              <article class="metric-card"><span>Relay 状态</span><strong class="metric-state" :class="account.relay_healthy ? 'good' : 'muted'">{{ account.relay_healthy ? '运行正常' : '未就绪' }}</strong><em>{{ (account.relays || []).length }} 个已配置</em></article>
+              <article class="metric-card"><span><Monitor :size="18" aria-hidden="true" /> 设备节点</span><strong>{{ account.device_count }} <small>/ {{ account.user.max_devices }}</small></strong><em>当前企业网络</em></article>
+              <article class="metric-card"><span><Network :size="18" aria-hidden="true" /> Overlay 地址池</span><strong class="metric-code">{{ account.user.overlay_cidr }}</strong><em>企业专属网段</em></article>
+              <article class="metric-card"><span><Cable :size="18" aria-hidden="true" /> 已批准子网</span><strong>{{ (account.subnet_routes || []).filter((route) => route.approved && route.status === 'active').length }}</strong><em>{{ (account.subnet_routes || []).length }} 条已发布</em></article>
+              <article class="metric-card"><span><Radio :size="18" aria-hidden="true" /> Relay 状态</span><strong class="metric-state" :class="account.relay_healthy ? 'good' : 'muted'">{{ account.relay_healthy ? '运行正常' : '未就绪' }}</strong><em>{{ (account.relays || []).length }} 个已配置</em></article>
             </div>
 
             <section class="content-section topology-section">

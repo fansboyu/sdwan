@@ -1,6 +1,6 @@
 # SD-WAN 部署手册
 
-本文档适用于当前 `v1.2.1`，统一说明服务器端三个服务和 Linux、Windows 客户端的部署方式。
+本文档适用于当前 `v1.2.2`，统一说明服务器端三个服务和 Linux、Windows 客户端的部署方式。
 
 ## 1. 部署组成
 
@@ -84,14 +84,14 @@ sudo systemctl enable --now docker
 
 ### 3.2 获取代码
 
-当前发布版本是 `v1.2.1`，包含 Resend 配置修复、Windows 安装包以及按客户端自动 Relay fallback：
+当前发布版本是 `v1.2.2`，包含 Resend 配置修复、Windows 安装包以及按客户端自动 Relay fallback：
 
 ```bash
 sudo mkdir -p /opt/sdwan
 sudo chown "$USER":"$USER" /opt/sdwan
 git clone https://github.com/fansboyu/sdwan.git /opt/sdwan
 cd /opt/sdwan
-git checkout v1.2.1
+git checkout v1.2.2
 ```
 
 升级现有部署前应先升级全部 Linux/Windows 客户端到 `v1.2.0`，再启用自动中继模式。
@@ -173,18 +173,18 @@ curl -fsS https://controller.englishlisten.cn/api/v1/server/version
 
 ```bash
 cd /opt/sdwan
-sudo mkdir -p downloads/v1.2.1
+sudo mkdir -p downloads/v1.2.2
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -o downloads/v1.2.1/sdwan-agent-linux-amd64 ./cmd/agent
+  -o downloads/v1.2.2/sdwan-agent-linux-amd64 ./cmd/agent
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -o downloads/v1.2.1/sdwan-bootstrap-agent-linux-amd64 ./cmd/bootstrap-agent
+  -o downloads/v1.2.2/sdwan-bootstrap-agent-linux-amd64 ./cmd/bootstrap-agent
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -o downloads/v1.2.1/sdwan-relay-agent-linux-amd64 ./cmd/relay-agent
+  -o downloads/v1.2.2/sdwan-relay-agent-linux-amd64 ./cmd/relay-agent
 
-chmod 755 downloads/v1.2.1/*
+chmod 755 downloads/v1.2.2/*
 cp deploy/install/install.sh downloads/install.sh
 chmod 755 downloads/install.sh
 ```
@@ -195,7 +195,7 @@ chmod 755 downloads/install.sh
 
 ```bash
 curl -I https://controller.englishlisten.cn/install.sh
-curl -I https://controller.englishlisten.cn/downloads/v1.2.1/sdwan-agent-linux-amd64
+curl -I https://controller.englishlisten.cn/downloads/v1.2.2/sdwan-agent-linux-amd64
 ```
 
 ## 4. 发现服务部署
@@ -269,7 +269,7 @@ sudo ufw allow 51872/udp
 
 ```bash
 sudo install -m 0755 \
-  /opt/sdwan/downloads/v1.2.1/sdwan-bootstrap-agent-linux-amd64 \
+  /opt/sdwan/downloads/v1.2.2/sdwan-bootstrap-agent-linux-amd64 \
   /usr/local/bin/sdwan-bootstrap-agent
 
 sudo install -d -m 700 /etc/sdwan
@@ -394,15 +394,15 @@ sudo sysctl --system
 
 ```bash
 install -D -m 0644 deploy/install/install-relay.sh \
-  /opt/sdwan/downloads/v1.2.1/install-relay.sh
+  /opt/sdwan/downloads/v1.2.2/install-relay.sh
 install -D -m 0644 deploy/systemd/sdwan-relay-agent.service \
-  /opt/sdwan/downloads/v1.2.1/sdwan-relay-agent.service
+  /opt/sdwan/downloads/v1.2.2/sdwan-relay-agent.service
 ```
 
 在管理台创建 Relay 后，在 Relay 主机运行：
 
 ```bash
-curl -fsSL https://controller.englishlisten.cn/downloads/v1.2.1/install-relay.sh | sudo sh
+curl -fsSL https://controller.englishlisten.cn/downloads/v1.2.2/install-relay.sh | sudo sh
 ```
 
 脚本会隐藏式提示输入一次性 Relay Token，安装 Linux amd64 Agent，创建权限为 `0600` 的配置文件，并启用 systemd 服务。也可从仓库目录直接执行 `sudo sh deploy/install/install-relay.sh`。
@@ -468,7 +468,7 @@ curl -fsSL https://controller.englishlisten.cn/install.sh | sudo sh
 脚本会：
 
 - 安装 `curl`、CA 证书和 `wireguard-tools`。
-- 下载 `v1.2.1` Linux Agent。
+- 下载 `v1.2.2` Linux Agent。
 - 安装到 `/usr/local/bin/sdwan-agent`。
 - 创建 `/etc/sdwan` 和 `/etc/wireguard`。
 - 安装 `sdwan-agent.service`。
@@ -529,7 +529,7 @@ sudo sdwan-agent subnet-gateway enable \
 推荐优先使用单文件安装包：
 
 ```text
-SD-WAN-Setup-v1.2.1-x64.exe
+SD-WAN-Setup-v1.2.2-x64.exe
 ```
 
 安装包自动请求管理员权限，将三个运行文件安装到 `C:\Program Files\SD-WAN`，并安装 `SDWANService`。安装后仍然采用复制 Admin Token、点击 `Join from Clipboard` 的入网方式。
@@ -543,7 +543,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy\windows\build-installer.ps1
 输出位置：
 
 ```text
-dist\windows\SD-WAN-Setup-v1.2.1-x64.exe
+dist\windows\SD-WAN-Setup-v1.2.2-x64.exe
 ```
 
 ### 7.1 发布文件
@@ -677,6 +677,14 @@ sudo journalctl -u sdwan-relay-agent -n 50 --no-pager
 ```
 
 ## 10. 版本升级
+
+### 平台只读运营入口
+
+企业入口仍为 `/`，平台入口为 `/platform`。同一 Web 镜像承载两套界面，平台 API 使用 `/api/platform/*`，企业 Admin Token 不可访问。
+
+默认禁用平台登录。启用时给 Controller 配置独立的 `PLATFORM_EMAIL` 与 `PLATFORM_PASSWORD_HASH`（bcrypt 哈希，建议 cost 12）。例如在有 Apache htpasswd 的环境运行 `htpasswd -nBC 12 operator`，交互输入密码后取冒号后的一段；Compose 的 `.env` 中用单引号包住哈希以保留字面量美元符号。不要提交配置文件，不要复用企业密码。生产环境建议将平台页面和 API 同时限制在可信运维网络。
+
+首版只支持一组配置型只读运营凭证；会话驻留在 Controller 进程中，有效期 8 小时，重启后需重新登录。不提供跨租户写入、告警/审计历史或多副本会话共享。
 
 ### 10.1 Controller 升级
 

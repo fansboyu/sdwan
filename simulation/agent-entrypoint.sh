@@ -31,7 +31,7 @@ if [ -n "${SDWAN_LAB_MANUAL_ENDPOINT:-}" ]; then
   curl -fsS -X POST \
     -H "Authorization: Bearer ${DEVICE_TOKEN}" \
     -H 'Content-Type: application/json' \
-    -d "{\"current_netmap_version\":0,\"client_version\":\"v1.2.1\",\"os_version\":\"docker-lab\",\"endpoints\":[{\"type\":\"manual\",\"addr\":\"${SDWAN_LAB_MANUAL_ENDPOINT}\",\"source\":\"docker-lab\"}]}" \
+    -d "{\"current_netmap_version\":0,\"client_version\":\"v1.2.2\",\"os_version\":\"docker-lab\",\"endpoints\":[{\"type\":\"manual\",\"addr\":\"${SDWAN_LAB_MANUAL_ENDPOINT}\",\"source\":\"docker-lab\"}]}" \
     "${CONTROLLER_URL}/api/v1/devices/poll" >/dev/null
 fi
 

@@ -1,6 +1,6 @@
 # SD-WAN Controller
 
-`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.2.1`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent、子网路由和免费升级业务逻辑。
+`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.2.2`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent、子网路由和免费升级业务逻辑。
 
 生产默认控制器域名：
 
@@ -444,7 +444,7 @@ docker compose build
 - Controller 使用独立 PostgreSQL 或 Compose PostgreSQL
 - Web 通过 Caddy/Nginx 反向代理
 - 下载文件建议放在 `/downloads/<version>/`
-- Linux Agent 安装脚本默认使用 `SDWAN_VERSION=v1.2.1`
+- Linux Agent 安装脚本默认使用 `SDWAN_VERSION=v1.2.2`
 - Controller 需要配置强随机 `ADMIN_JWT_SECRET`
 - Bootstrap 和 Relay Token 必须独立生成并妥善保存
 

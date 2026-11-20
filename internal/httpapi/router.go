@@ -31,6 +31,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("GET /healthz", r.healthz)
 	r.mux.HandleFunc("GET /readyz", r.readyz)
 	r.mux.HandleFunc("GET /api/v1/server/version", r.serverVersion)
+	r.platformRoutes()
 
 	r.mux.HandleFunc("POST /admin/auth/email-code", r.sendEmailCode)
 	r.mux.HandleFunc("POST /admin/auth/register", r.registerAdmin)

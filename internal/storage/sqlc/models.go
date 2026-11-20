@@ -98,32 +98,57 @@ type SubnetRoute struct {
 	GatewayRouteInterface string     `json:"gateway_route_interface"`
 	GatewayLANTarget      string     `json:"gateway_lan_target"`
 	GatewayLANReachable   bool       `json:"gateway_lan_reachable"`
+	GatewayServiceStatus  string     `json:"gateway_service_status"`
+	GatewayHistory        string     `json:"gateway_history"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
-type Relay struct {
+type SubnetRouteConflict struct {
 	ID         string     `json:"id"`
-	UserID     string     `json:"user_id"`
-	Name       string     `json:"name"`
-	PublicKey  string     `json:"public_key"`
-	VirtualIP  string     `json:"virtual_ip"`
-	Endpoint   string     `json:"endpoint"`
-	Status     string     `json:"status"`
-	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	DeviceID   string     `json:"device_id"`
+	CIDR       string     `json:"cidr"`
+	Details    string     `json:"details"`
 	CreatedAt  time.Time  `json:"created_at"`
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
+}
+
+type Relay struct {
+	ID                 string     `json:"id"`
+	UserID             string     `json:"user_id"`
+	Name               string     `json:"name"`
+	PublicKey          string     `json:"public_key"`
+	VirtualIP          string     `json:"virtual_ip"`
+	Endpoint           string     `json:"endpoint"`
+	Status             string     `json:"status"`
+	LastSeenAt         *time.Time `json:"last_seen_at,omitempty"`
+	InterfaceUp        bool       `json:"interface_up"`
+	SyncedPeerCount    int32      `json:"synced_peer_count"`
+	Version            string     `json:"version"`
+	LastError          string     `json:"last_error"`
+	LastSyncAt         *time.Time `json:"last_sync_at,omitempty"`
+	SyncOK             bool       `json:"sync_ok"`
+	HandshakePeerCount int32      `json:"handshake_peer_count"`
+	LastHandshakeAt    *time.Time `json:"last_handshake_at,omitempty"`
+	HealthStatus       string     `json:"health_status,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 type PeerPath struct {
-	UserID           string    `json:"user_id"`
-	ClientDeviceID   string    `json:"client_device_id"`
-	MainSiteDeviceID string    `json:"main_site_device_id"`
-	CurrentPath      string    `json:"current_path"`
-	DesiredPath      string    `json:"desired_path"`
-	State            string    `json:"state"`
-	Generation       int64     `json:"generation"`
-	SwitchedAt       time.Time `json:"switched_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	UserID             string     `json:"user_id"`
+	ClientDeviceID     string     `json:"client_device_id"`
+	MainSiteDeviceID   string     `json:"main_site_device_id"`
+	CurrentPath        string     `json:"current_path"`
+	DesiredPath        string     `json:"desired_path"`
+	State              string     `json:"state"`
+	Generation         int64      `json:"generation"`
+	VerifiedPath       string     `json:"verified_path"`
+	VerifiedGeneration int64      `json:"verified_generation"`
+	VerificationState  string     `json:"verification_state"`
+	VerificationError  string     `json:"verification_error"`
+	VerifiedAt         *time.Time `json:"verified_at,omitempty"`
+	SwitchedAt         time.Time  `json:"switched_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 type DevicePeerStat struct {
@@ -134,4 +159,20 @@ type DevicePeerStat struct {
 	TxBytes         int64      `json:"tx_bytes"`
 	LastRxAt        *time.Time `json:"last_rx_at,omitempty"`
 	ReportedAt      time.Time  `json:"reported_at"`
+}
+
+type DevicePathQuality struct {
+	DeviceID          string     `json:"device_id"`
+	PeerDeviceID      string     `json:"peer_device_id"`
+	PathType          string     `json:"path_type"`
+	CurrentPath       bool       `json:"current_path"`
+	Endpoint          string     `json:"endpoint"`
+	LatestHandshakeAt *time.Time `json:"latest_handshake_at,omitempty"`
+	RxBytes           int64      `json:"rx_bytes"`
+	TxBytes           int64      `json:"tx_bytes"`
+	LastRxAt          *time.Time `json:"last_rx_at,omitempty"`
+	FailCount         int32      `json:"fail_count"`
+	LastOKAt          *time.Time `json:"last_ok_at,omitempty"`
+	LastFailedAt      *time.Time `json:"last_failed_at,omitempty"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }

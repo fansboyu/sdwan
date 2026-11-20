@@ -1,0 +1,155 @@
+services:
+  postgres:
+    volumes:
+      - lab_postgres_data:/var/lib/postgresql/data
+    networks:
+      - lab
+
+  controller:
+    ports: !override
+      - "127.0.0.1:18181:8080"
+    environment:
+      CONTROLLER_URL: http://controller:8080
+      RESEND_API_KEY: ""
+      RESEND_FROM: ""
+    networks:
+      - lab
+
+  web:
+    ports: !override
+      - "127.0.0.1:8182:80"
+    networks:
+      - lab
+
+  lab-seed:
+    build:
+      context: .
+      dockerfile: simulation/Dockerfile
+    entrypoint: ["/usr/local/bin/sdwan-lab-seed"]
+    environment:
+      DATABASE_URL: postgres://sdwan:sdwan@postgres:5432/sdwan?sslmode=disable
+      LAB_ADMIN_EMAIL: lab-admin@sdwan.test
+      LAB_ADMIN_PASSWORD: LabNetwork2026!
+      LAB_ADMIN_TOKEN: sdwan_admin_docker_lab_only
+    depends_on:
+      postgres:
+        condition: service_healthy
+      controller:
+        condition: service_started
+    networks:
+      - lab
+    restart: "no"
+
+  main-hub:
+    build:
+      context: .
+      dockerfile: simulation/Dockerfile
+    hostname: main-hub
+    environment:
+      SDWAN_CONTROLLER_URL: http://controller:8080
+      SDWAN_ADMIN_TOKEN: sdwan_admin_docker_lab_only
+      SDWAN_DEVICE_HOSTNAME: main-hub
+      SDWAN_SITE_ROLE: main_site
+      SDWAN_ADVERTISE_ROUTES: 192.168.250.0/24
+      SDWAN_LAB_MANUAL_ENDPOINT: 10.254.10.10:41641
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    depends_on:
+      lab-seed:
+        condition: service_completed_successfully
+    networks:
+      lab:
+        ipv4_address: 10.254.10.10
+      hq-lan:
+        ipv4_address: 192.168.250.2
+    volumes:
+      - lab_hub_config:/etc/sdwan
+    restart: unless-stopped
+
+  branch-east:
+    build:
+      context: .
+      dockerfile: simulation/Dockerfile
+    hostname: branch-east
+    environment:
+      SDWAN_CONTROLLER_URL: http://controller:8080
+      SDWAN_ADMIN_TOKEN: sdwan_admin_docker_lab_only
+      SDWAN_DEVICE_HOSTNAME: branch-east
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    depends_on:
+      lab-seed:
+        condition: service_completed_successfully
+      main-hub:
+        condition: service_started
+    networks:
+      - lab
+    volumes:
+      - lab_branch_east_config:/etc/sdwan
+    restart: unless-stopped
+
+  branch-west:
+    build:
+      context: .
+      dockerfile: simulation/Dockerfile
+    hostname: branch-west
+    environment:
+      SDWAN_CONTROLLER_URL: http://controller:8080
+      SDWAN_ADMIN_TOKEN: sdwan_admin_docker_lab_only
+      SDWAN_DEVICE_HOSTNAME: branch-west
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    depends_on:
+      lab-seed:
+        condition: service_completed_successfully
+      main-hub:
+        condition: service_started
+    networks:
+      - lab
+    volumes:
+      - lab_branch_west_config:/etc/sdwan
+    restart: unless-stopped
+
+  hq-service:
+    build:
+      context: .
+      dockerfile: simulation/Dockerfile
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - ip route replace 100.64.240.0/24 via 192.168.250.2 && exec /usr/local/bin/sdwan-lab-seed http
+    cap_add:
+      - NET_ADMIN
+    networks:
+      hq-lan:
+        ipv4_address: 192.168.250.10
+    restart: unless-stopped
+
+networks:
+  lab:
+    name: sdwan-simulation
+    ipam:
+      config:
+        - subnet: 10.254.10.0/24
+  hq-lan:
+    name: sdwan-simulation-hq
+    ipam:
+      config:
+        - subnet: 192.168.250.0/24
+
+volumes:
+  lab_postgres_data:
+  lab_hub_config:
+  lab_branch_east_config:
+  lab_branch_west_config:

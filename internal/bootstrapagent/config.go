@@ -21,7 +21,6 @@ type Config struct {
 	InterfaceName         string `json:"interface_name"`
 	SyncIntervalSeconds   int    `json:"sync_interval_seconds"`
 	ReportIntervalSeconds int    `json:"report_interval_seconds"`
-	RemoveStalePeers      bool   `json:"remove_stale_peers"`
 }
 
 func LoadConfig(path string) (Config, error) {

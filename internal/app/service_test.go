@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +117,16 @@ func TestValidateAdvertisedSubnetRoutesAllowsSameDeviceReplacement(t *testing.T)
 	err := validateAdvertisedSubnetRoutes("dev_main", []string{"192.168.1.0/24"}, existing)
 	if err != nil {
 		t.Fatalf("expected same device exact route to remain allowed: %v", err)
+	}
+}
+
+func TestFindSubnetRouteConflictsIncludesExistingAndAdvertisedCIDRs(t *testing.T) {
+	existing := []sqlc.SubnetRoute{{ID: "srt_other", DeviceID: "dev_other", Cidr: "192.168.10.0/24", Advertised: true}}
+	conflicts := findSubnetRouteConflicts("dev_hub", []string{"192.168.10.128/25", "10.20.0.0/16", "10.20.1.0/24"}, existing)
+	if len(conflicts) != 2 {
+		t.Fatalf("expected two conflict records, got %#v", conflicts)
+	}
+	if conflicts[0].CIDR != "192.168.10.128/25" || !strings.Contains(conflicts[0].Details, "dev_other") {
+		t.Fatalf("unexpected existing-route conflict: %#v", conflicts[0])
 	}
 }

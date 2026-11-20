@@ -7,13 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type WGPeerState struct {
-	PublicKey string
-	Endpoint  string
-	AllowedIP string
+	PublicKey       string
+	Endpoint        string
+	AllowedIP       string
+	LatestHandshake time.Time
+	RxBytes         int64
+	TxBytes         int64
 }
 
 type WGManager struct {
@@ -82,7 +87,7 @@ func (m WGManager) DumpPeers(ctx context.Context) (map[string]WGPeerState, error
 			continue
 		}
 		fields := strings.Split(scanner.Text(), "\t")
-		if len(fields) < 4 {
+		if len(fields) < 8 {
 			continue
 		}
 		publicKey := strings.TrimSpace(fields[0])
@@ -93,10 +98,20 @@ func (m WGManager) DumpPeers(ctx context.Context) (map[string]WGPeerState, error
 		if endpoint == "(none)" {
 			endpoint = ""
 		}
+		handshakeUnix, _ := strconv.ParseInt(fields[4], 10, 64)
+		rxBytes, _ := strconv.ParseInt(fields[5], 10, 64)
+		txBytes, _ := strconv.ParseInt(fields[6], 10, 64)
+		var latestHandshake time.Time
+		if handshakeUnix > 0 {
+			latestHandshake = time.Unix(handshakeUnix, 0)
+		}
 		result[publicKey] = WGPeerState{
-			PublicKey: publicKey,
-			Endpoint:  endpoint,
-			AllowedIP: strings.TrimSpace(fields[3]),
+			PublicKey:       publicKey,
+			Endpoint:        endpoint,
+			AllowedIP:       strings.TrimSpace(fields[3]),
+			LatestHandshake: latestHandshake,
+			RxBytes:         rxBytes,
+			TxBytes:         txBytes,
 		}
 	}
 	if err := scanner.Err(); err != nil {

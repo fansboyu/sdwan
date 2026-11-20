@@ -39,6 +39,13 @@ func (s *Store) Close() {
 	}
 }
 
+func (s *Store) Ping(ctx context.Context) error {
+	if s == nil || s.pool == nil {
+		return errors.New("storage is not open")
+	}
+	return s.pool.Ping(ctx)
+}
+
 func (s *Store) Migrate(ctx context.Context) error {
 	if s == nil || s.pool == nil {
 		return errors.New("storage is not open")

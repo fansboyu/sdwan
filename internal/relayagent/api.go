@@ -32,14 +32,24 @@ type peersResponse struct {
 	Peers []bootstrapagent.Peer `json:"peers"`
 }
 
+type HeartbeatRequest struct {
+	InterfaceUp        bool       `json:"interface_up"`
+	SyncedPeerCount    int32      `json:"synced_peer_count"`
+	HandshakePeerCount int32      `json:"handshake_peer_count"`
+	LastHandshakeAt    *time.Time `json:"last_handshake_at,omitempty"`
+	Version            string     `json:"version"`
+	LastError          string     `json:"last_error"`
+	SyncOK             bool       `json:"sync_ok"`
+}
+
 func (c *APIClient) Peers(ctx context.Context) (peersResponse, error) {
 	var resp peersResponse
 	err := c.doJSON(ctx, http.MethodGet, "/api/v1/relays/peers", nil, &resp)
 	return resp, err
 }
 
-func (c *APIClient) Heartbeat(ctx context.Context) error {
-	return c.doJSON(ctx, http.MethodPost, "/api/v1/relays/heartbeat", map[string]string{}, nil)
+func (c *APIClient) Heartbeat(ctx context.Context, req HeartbeatRequest) error {
+	return c.doJSON(ctx, http.MethodPost, "/api/v1/relays/heartbeat", req, nil)
 }
 
 func (c *APIClient) doJSON(ctx context.Context, method, path string, body any, target any) error {

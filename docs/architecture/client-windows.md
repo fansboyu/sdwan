@@ -23,6 +23,8 @@ deploy/windows/README.md
 
 仓库中的通用 `sdwan-agent.exe` 仍保留旧的 WireGuard for Windows 路线，但正式 Windows 产品优先使用 `sdwan-service.exe + sdwan-tray.exe`。
 
+普通用户统一从 Windows 安装包进入：安装后启动托盘，复制 Web 管理台的 Admin Token 并执行 Join。Join 成功会自动安装/启动服务并连接；命令行仅用于维护和诊断。
+
 ## 2. 运行结构
 
 ```mermaid
@@ -111,20 +113,7 @@ Service 循环执行：
 
 ## 7. 托盘功能
 
-当前 Go 托盘提供：
-
-```text
-Join                 使用 Admin Token 注册
-Connect              安装并启动 SDWANService
-Restart Service      重启服务并触发同步
-Disconnect           停止服务
-Auto Start            控制服务自动启动
-Edit Configuration   打开配置文件
-Open Data Folder      打开数据目录
-Start with Windows    管理托盘程序开机启动
-About                 显示版本
-Quit                  退出托盘，不等于卸载服务
-```
+当前托盘菜单：主菜单提供 Joined/Connected 状态、Join、Connect、Disconnect 和 Exit；Advanced 子菜单提供 Restart Service、Auto Start、Edit Settings、Open Config Folder、Start with Windows 和 About。
 
 托盘只是管理入口，实际隧道生命周期由 Windows Service 承担。
 
@@ -188,7 +177,7 @@ Windows 客户端会连接 Controller 下发的固定 Bootstrap peer，让服务
 - 自动 Relay fallback。
 - 多 Relay 选择和连接质量判断。
 - ACL、MagicDNS、Exit Node。
-- 完整 MSI 安装包、自动升级和代码签名流程。
+- 自动升级和代码签名流程。
 
 Windows 可以作为普通节点访问 Linux 主站点发布的子网，但不能作为发布 LAN 子网的主站点网关。
 

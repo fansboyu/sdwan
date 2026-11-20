@@ -79,6 +79,7 @@ func CheckSubnetGatewayStatus(opts SubnetGatewayOptions) (SubnetGatewayStatus, e
 	status.WGInterface = opts.WGInterface
 	status.OverlayCIDR = opts.OverlayCIDR
 	status.LANTarget = opts.LANTarget
+	status.ServiceTargets = append([]string(nil), opts.ServiceTargets...)
 	status.SuggestedOutInterface = status.RouteInterface
 	if status.SuggestedOutInterface == status.OutInterface {
 		status.SuggestedOutInterface = ""
@@ -111,6 +112,7 @@ func CheckSubnetGatewayStatus(opts SubnetGatewayOptions) (SubnetGatewayStatus, e
 	if !status.RouteMatchesOutInterface {
 		status.Warnings = append(status.Warnings, fmt.Sprintf("route to %s uses %s, not %s", opts.LANTarget, status.RouteInterface, opts.OutInterface))
 	}
+	status.ServiceProbes = probeTCPServices(opts.LANCIDR, opts.ServiceTargets)
 	if !status.LANTargetReachable {
 		status.Warnings = append(status.Warnings, fmt.Sprintf("LAN target %s did not respond to ping", opts.LANTarget))
 	}

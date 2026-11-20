@@ -37,7 +37,6 @@ func main() {
 			RelayToken:          *relayToken,
 			InterfaceName:       *interfaceName,
 			SyncIntervalSeconds: int(relayagent.DefaultSyncInterval.Seconds()),
-			RemoveStalePeers:    false,
 		})
 		if err != nil {
 			fatal(err)

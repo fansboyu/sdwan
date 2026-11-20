@@ -40,6 +40,8 @@ type Config struct {
 	AdvertiseRoutes []string               `json:"advertise_routes,omitempty"`
 	SubnetGateways  []SubnetGatewayOptions `json:"subnet_gateways,omitempty"`
 	AppliedPaths    []AppliedPath          `json:"applied_paths,omitempty"`
+	PathQualities   []PathQualityState     `json:"path_qualities,omitempty"`
+	LastNetmap      *Netmap                `json:"last_netmap,omitempty"`
 }
 
 func LoadConfig(path string) (Config, error) {

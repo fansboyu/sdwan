@@ -154,6 +154,7 @@ sudo sdwan-agent subnet-gateway enable \
 - 增加 overlay 到 LAN 的 MASQUERADE。
 - 增加 WireGuard 到 LAN 的 FORWARD。
 - 允许 LAN 返回的 RELATED/ESTABLISHED 流量。
+- 可通过 `--service-targets 192.168.50.10:443,192.168.50.20:22` 显式配置 TCP 服务探测；目标必须位于已发布 CIDR 内，每条路由最多 8 个，连接超时 700ms。
 
 检查或关闭：
 
@@ -165,7 +166,7 @@ sudo sdwan-agent subnet-gateway disable \
   --lan-cidr 192.168.50.0/24
 ```
 
-状态会持续上报到 Controller。管理台会展示网关是否启用、出口接口、系统实际路由接口、LAN 探测目标是否可达和最近错误。若 LAN 网关禁止 ICMP，`lan_target_reachable` 可能为 false，可改用 `--lan-target` 指向稳定响应 ping 的内网主机。
+状态会持续上报到 Controller。管理台会展示网关是否启用、出口接口、系统实际路由接口、LAN ping 和 TCP 服务探测结果及最近错误。TCP 探测只验证 TCP 建连，不做应用层登录或 HTTP 内容检查。若 LAN 网关禁止 ICMP，`lan_target_reachable` 可能为 false，可改用 `--lan-target` 指向稳定响应 ping 的内网主机。
 
 ## 8. 常用命令
 

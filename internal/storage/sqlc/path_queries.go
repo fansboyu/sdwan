@@ -11,7 +11,7 @@ func (q *Queries) UpdateUserPathMode(ctx context.Context, userID, mode string) e
 }
 
 func (q *Queries) ListPeerPathsByUser(ctx context.Context, userID string) ([]PeerPath, error) {
-	rows, err := q.db.Query(ctx, `SELECT user_id, client_device_id, main_site_device_id, current_path, desired_path, state, generation, switched_at, updated_at FROM peer_paths WHERE user_id=$1 ORDER BY client_device_id`, userID)
+	rows, err := q.db.Query(ctx, `SELECT user_id, client_device_id, main_site_device_id, current_path, desired_path, state, generation, verified_path, verified_generation, verification_state, verification_error, verified_at, switched_at, updated_at FROM peer_paths WHERE user_id=$1 ORDER BY client_device_id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +19,7 @@ func (q *Queries) ListPeerPathsByUser(ctx context.Context, userID string) ([]Pee
 	var result []PeerPath
 	for rows.Next() {
 		var item PeerPath
-		if err := rows.Scan(&item.UserID, &item.ClientDeviceID, &item.MainSiteDeviceID, &item.CurrentPath, &item.DesiredPath, &item.State, &item.Generation, &item.SwitchedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.UserID, &item.ClientDeviceID, &item.MainSiteDeviceID, &item.CurrentPath, &item.DesiredPath, &item.State, &item.Generation, &item.VerifiedPath, &item.VerifiedGeneration, &item.VerificationState, &item.VerificationError, &item.VerifiedAt, &item.SwitchedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -31,17 +31,18 @@ func (q *Queries) EnsurePeerPath(ctx context.Context, userID, clientID, mainSite
 	row := q.db.QueryRow(ctx, `INSERT INTO peer_paths (user_id, client_device_id, main_site_device_id, current_path, desired_path, state)
 VALUES ($1,$2,$3,$4,$4,$4)
 ON CONFLICT (user_id, client_device_id) DO UPDATE SET main_site_device_id=EXCLUDED.main_site_device_id
-RETURNING user_id, client_device_id, main_site_device_id, current_path, desired_path, state, generation, switched_at, updated_at`, userID, clientID, mainSiteID, desired)
+RETURNING user_id, client_device_id, main_site_device_id, current_path, desired_path, state, generation, verified_path, verified_generation, verification_state, verification_error, verified_at, switched_at, updated_at`, userID, clientID, mainSiteID, desired)
 	var item PeerPath
-	err := row.Scan(&item.UserID, &item.ClientDeviceID, &item.MainSiteDeviceID, &item.CurrentPath, &item.DesiredPath, &item.State, &item.Generation, &item.SwitchedAt, &item.UpdatedAt)
+	err := row.Scan(&item.UserID, &item.ClientDeviceID, &item.MainSiteDeviceID, &item.CurrentPath, &item.DesiredPath, &item.State, &item.Generation, &item.VerifiedPath, &item.VerifiedGeneration, &item.VerificationState, &item.VerificationError, &item.VerifiedAt, &item.SwitchedAt, &item.UpdatedAt)
 	return item, err
 }
 
 func (q *Queries) SetPeerPathDesired(ctx context.Context, userID, clientID, desired, state string) (PeerPath, error) {
-	row := q.db.QueryRow(ctx, `UPDATE peer_paths SET desired_path=$3, state=$4, generation=generation+1, updated_at=now() WHERE user_id=$1 AND client_device_id=$2
-RETURNING user_id, client_device_id, main_site_device_id, current_path, desired_path, state, generation, switched_at, updated_at`, userID, clientID, desired, state)
+	row := q.db.QueryRow(ctx, `UPDATE peer_paths SET desired_path=$3, state=$4, generation=generation+1,
+ verification_state='pending', verification_error='', verified_at=NULL, updated_at=now() WHERE user_id=$1 AND client_device_id=$2
+RETURNING user_id, client_device_id, main_site_device_id, current_path, desired_path, state, generation, verified_path, verified_generation, verification_state, verification_error, verified_at, switched_at, updated_at`, userID, clientID, desired, state)
 	var item PeerPath
-	err := row.Scan(&item.UserID, &item.ClientDeviceID, &item.MainSiteDeviceID, &item.CurrentPath, &item.DesiredPath, &item.State, &item.Generation, &item.SwitchedAt, &item.UpdatedAt)
+	err := row.Scan(&item.UserID, &item.ClientDeviceID, &item.MainSiteDeviceID, &item.CurrentPath, &item.DesiredPath, &item.State, &item.Generation, &item.VerifiedPath, &item.VerifiedGeneration, &item.VerificationState, &item.VerificationError, &item.VerifiedAt, &item.SwitchedAt, &item.UpdatedAt)
 	return item, err
 }
 
@@ -52,6 +53,14 @@ func (q *Queries) SetPeerPathState(ctx context.Context, userID, clientID, state 
 
 func (q *Queries) CompletePeerPath(ctx context.Context, userID, clientID string) error {
 	_, err := q.db.Exec(ctx, `UPDATE peer_paths SET current_path=desired_path, state=desired_path, switched_at=now(), updated_at=now() WHERE user_id=$1 AND client_device_id=$2`, userID, clientID)
+	return err
+}
+
+func (q *Queries) UpdatePeerPathVerification(ctx context.Context, userID, clientID, state, verifiedPath, message string, generation int64, verified bool) error {
+	_, err := q.db.Exec(ctx, `UPDATE peer_paths SET verification_state=$3, verified_path=CASE WHEN $7 THEN $4 ELSE verified_path END,
+ verified_generation=CASE WHEN $7 THEN $6 ELSE verified_generation END, verification_error=$5,
+ verified_at=CASE WHEN $7 THEN now() ELSE verified_at END, verification_updated_at=now()
+ WHERE user_id=$1 AND client_device_id=$2`, userID, clientID, state, verifiedPath, message, generation, verified)
 	return err
 }
 
@@ -70,6 +79,90 @@ ON CONFLICT (device_id,peer_public_key) DO UPDATE SET
 	return err
 }
 
+type UpsertDevicePathQualityParams struct {
+	DeviceID          string
+	PeerDeviceID      string
+	PathType          string
+	CurrentPath       bool
+	Endpoint          string
+	LatestHandshakeAt *time.Time
+	RxBytes           int64
+	TxBytes           int64
+	LastRxAt          *time.Time
+	FailCount         int32
+	LastOKAt          *time.Time
+	LastFailedAt      *time.Time
+}
+
+func (q *Queries) UpsertDevicePathQuality(ctx context.Context, arg UpsertDevicePathQualityParams) error {
+	_, err := q.db.Exec(ctx, `INSERT INTO device_path_quality (
+  device_id, peer_device_id, path_type, current_path, endpoint, latest_handshake_at,
+  rx_bytes, tx_bytes, last_rx_at, fail_count, last_ok_at, last_failed_at, updated_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7::bigint,$8::bigint,$9,$10,$11,$12,now())
+ON CONFLICT (device_id, peer_device_id, path_type) DO UPDATE SET
+  current_path=EXCLUDED.current_path,
+  endpoint=EXCLUDED.endpoint,
+  latest_handshake_at=EXCLUDED.latest_handshake_at,
+  rx_bytes=EXCLUDED.rx_bytes,
+  tx_bytes=EXCLUDED.tx_bytes,
+  last_rx_at=EXCLUDED.last_rx_at,
+  fail_count=EXCLUDED.fail_count,
+  last_ok_at=EXCLUDED.last_ok_at,
+  last_failed_at=EXCLUDED.last_failed_at,
+  updated_at=now()`,
+		arg.DeviceID,
+		arg.PeerDeviceID,
+		arg.PathType,
+		arg.CurrentPath,
+		arg.Endpoint,
+		arg.LatestHandshakeAt,
+		arg.RxBytes,
+		arg.TxBytes,
+		arg.LastRxAt,
+		arg.FailCount,
+		arg.LastOKAt,
+		arg.LastFailedAt,
+	)
+	return err
+}
+
+func (q *Queries) ListPathQualityByUser(ctx context.Context, userID string) ([]DevicePathQuality, error) {
+	rows, err := q.db.Query(ctx, `SELECT q.device_id, q.peer_device_id, q.path_type, q.current_path, q.endpoint,
+       q.latest_handshake_at, q.rx_bytes, q.tx_bytes, q.last_rx_at, q.fail_count,
+       q.last_ok_at, q.last_failed_at, q.updated_at
+FROM device_path_quality q
+JOIN devices d ON d.id = q.device_id
+WHERE d.user_id = $1
+ORDER BY q.updated_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []DevicePathQuality
+	for rows.Next() {
+		var item DevicePathQuality
+		if err := rows.Scan(
+			&item.DeviceID,
+			&item.PeerDeviceID,
+			&item.PathType,
+			&item.CurrentPath,
+			&item.Endpoint,
+			&item.LatestHandshakeAt,
+			&item.RxBytes,
+			&item.TxBytes,
+			&item.LastRxAt,
+			&item.FailCount,
+			&item.LastOKAt,
+			&item.LastFailedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func (q *Queries) GetDevicePeerStat(ctx context.Context, deviceID, publicKey string) (DevicePeerStat, error) {
 	row := q.db.QueryRow(ctx, `SELECT device_id,peer_public_key,latest_handshake_at,rx_bytes,tx_bytes,last_rx_at,reported_at FROM device_peer_stats WHERE device_id=$1 AND peer_public_key=$2`, deviceID, publicKey)
 	var item DevicePeerStat
@@ -77,10 +170,29 @@ func (q *Queries) GetDevicePeerStat(ctx context.Context, deviceID, publicKey str
 	return item, err
 }
 
-func (q *Queries) UpsertAppliedPath(ctx context.Context, deviceID, clientID string, generation int64) error {
-	_, err := q.db.Exec(ctx, `INSERT INTO device_path_applied(device_id,client_device_id,generation) VALUES($1,$2,$3)
-ON CONFLICT(device_id,client_device_id) DO UPDATE SET generation=GREATEST(device_path_applied.generation,EXCLUDED.generation),updated_at=now()`, deviceID, clientID, generation)
+func (q *Queries) UpsertAppliedPath(ctx context.Context, deviceID, clientID string, generation int64, effectivePath, verificationStatus, verificationError string) error {
+	_, err := q.db.Exec(ctx, `INSERT INTO device_path_applied(device_id,client_device_id,generation,effective_path,verification_status,verification_error,verified_at)
+VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $5='verified' THEN now() END)
+ON CONFLICT(device_id,client_device_id) DO UPDATE SET
+ generation=GREATEST(device_path_applied.generation,EXCLUDED.generation),
+ effective_path=CASE WHEN EXCLUDED.generation>=device_path_applied.generation THEN EXCLUDED.effective_path ELSE device_path_applied.effective_path END,
+ verification_status=CASE WHEN EXCLUDED.generation>=device_path_applied.generation THEN EXCLUDED.verification_status ELSE device_path_applied.verification_status END,
+ verification_error=CASE WHEN EXCLUDED.generation>=device_path_applied.generation THEN EXCLUDED.verification_error ELSE device_path_applied.verification_error END,
+ verified_at=CASE WHEN EXCLUDED.generation>=device_path_applied.generation THEN EXCLUDED.verified_at ELSE device_path_applied.verified_at END, updated_at=now()`, deviceID, clientID, generation, effectivePath, verificationStatus, verificationError)
 	return err
+}
+
+type AppliedPathStatus struct {
+	Generation         int64
+	EffectivePath      string
+	VerificationStatus string
+	VerificationError  string
+}
+
+func (q *Queries) GetAppliedPathStatus(ctx context.Context, deviceID, clientID string) (AppliedPathStatus, error) {
+	var item AppliedPathStatus
+	err := q.db.QueryRow(ctx, `SELECT generation,effective_path,verification_status,verification_error FROM device_path_applied WHERE device_id=$1 AND client_device_id=$2`, deviceID, clientID).Scan(&item.Generation, &item.EffectivePath, &item.VerificationStatus, &item.VerificationError)
+	return item, err
 }
 
 func (q *Queries) GetAppliedPathGeneration(ctx context.Context, deviceID, clientID string) (int64, error) {

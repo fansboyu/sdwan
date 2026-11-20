@@ -6,7 +6,7 @@ This file is for AI coding agents and human maintainers who need to understand t
 
 `sdwan` is a minimal Tailscale-like SD-WAN product.
 
-Current version: `v1.2.0`
+Current version: `v1.2.1`
 
 The project is currently an MVP with:
 
@@ -358,7 +358,7 @@ cd /opt/sdwan
 git fetch --tags
 git reset --hard
 git clean -fd
-git checkout v1.2.0
+git checkout v1.2.1
 docker compose up -d --build controller web
 ```
 
@@ -424,7 +424,6 @@ Example:
   "interface_name": "sdwan-bootstrap",
   "sync_interval_seconds": 5,
   "report_interval_seconds": 2,
-  "remove_stale_peers": false
 }
 ```
 

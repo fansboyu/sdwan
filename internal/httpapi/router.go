@@ -27,8 +27,9 @@ func NewRouter(svc *app.Service, logger *slog.Logger) http.Handler {
 }
 
 func (r *Router) routes() {
+	r.mux.HandleFunc("GET /{$}", r.controllerHome)
 	r.mux.HandleFunc("GET /healthz", r.healthz)
-	r.mux.HandleFunc("GET /readyz", r.healthz)
+	r.mux.HandleFunc("GET /readyz", r.readyz)
 	r.mux.HandleFunc("GET /api/v1/server/version", r.serverVersion)
 
 	r.mux.HandleFunc("POST /admin/auth/email-code", r.sendEmailCode)
@@ -61,8 +62,25 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/bootstrap/endpoints", r.reportBootstrapEndpoint)
 }
 
+func (r *Router) controllerHome(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SD-WAN Controller</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;margin:0;background:#f3f6fa;color:#1c2733}.page{max-width:680px;margin:12vh auto;padding:28px}h1{font-size:26px;margin:0 0 8px}.status{color:#197552;font-weight:650}.links{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}a{color:#155fc0}code{background:#e6edf5;padding:3px 6px;border-radius:4px}</style></head>
+<body><main class="page"><h1>SD-WAN Controller</h1><p class="status">Controller API 正在运行</p><p>此端口提供控制器 API，不是管理台页面。管理台请访问 <a href="http://localhost:8082">http://localhost:8082</a>。</p><div class="links"><a href="/healthz">服务存活状态</a><a href="/readyz">服务就绪状态</a><a href="/api/v1/server/version">服务版本</a></div><p>API 前缀：<code>/admin/*</code>、<code>/api/v1/*</code></p></main></body></html>`))
+}
+
 func (r *Router) healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (r *Router) readyz(w http.ResponseWriter, req *http.Request) {
+	if err := r.svc.Ready(req.Context()); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "dependency": "database"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func (r *Router) serverVersion(w http.ResponseWriter, _ *http.Request) {
@@ -530,7 +548,12 @@ func (r *Router) relayPeers(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) relayHeartbeat(w http.ResponseWriter, req *http.Request) {
-	if err := r.svc.RelayHeartbeat(req.Context(), req.Header.Get("Authorization")); err != nil {
+	var body app.RelayHeartbeatRequest
+	if err := readJSON(req, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := r.svc.RelayHeartbeat(req.Context(), req.Header.Get("Authorization"), body); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, app.ErrUnauthorized) {
 			status = http.StatusUnauthorized

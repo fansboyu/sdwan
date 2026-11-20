@@ -72,18 +72,16 @@ func (r *Runner) SyncPeers(ctx context.Context) error {
 			return err
 		}
 	}
-	if r.Config.RemoveStalePeers {
-		current, err := r.WG.DumpPeers(ctx)
-		if err != nil {
-			return err
-		}
-		for publicKey := range current {
-			if _, ok := desired[publicKey]; !ok {
-				if err := r.WG.RemovePeer(ctx, publicKey); err != nil {
-					return err
-				}
-				delete(r.lastEndpoints, publicKey)
+	current, err := r.WG.DumpPeers(ctx)
+	if err != nil {
+		return err
+	}
+	for publicKey := range current {
+		if _, ok := desired[publicKey]; !ok {
+			if err := r.WG.RemovePeer(ctx, publicKey); err != nil {
+				return err
 			}
+			delete(r.lastEndpoints, publicKey)
 		}
 	}
 	log.Printf("bootstrap peers synced: desired=%d", len(desired))

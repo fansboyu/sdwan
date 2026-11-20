@@ -273,17 +273,19 @@ func subnetGatewayFlagSet(name string, args []string) (agent.SubnetGatewayOption
 	lanCIDR := fs.String("lan-cidr", "", "LAN subnet CIDR to expose, for example 192.168.50.0/24")
 	outInterface := fs.String("out-interface", "", "LAN-facing output interface, for example eth0; inferred from --lan-cidr when omitted")
 	lanTarget := fs.String("lan-target", "", "optional LAN IP to test, for example 192.168.50.1")
+	serviceTargets := fs.String("service-targets", "", "comma-separated TCP targets inside the LAN CIDR")
 	wgInterface := fs.String("wg-interface", agent.DefaultInterface, "SD-WAN WireGuard interface")
 	overlayCIDR := fs.String("overlay-cidr", agent.DefaultOverlayCIDR, "SD-WAN overlay CIDR")
 	if err := fs.Parse(args); err != nil {
 		return agent.SubnetGatewayOptions{}, "", err
 	}
 	return agent.SubnetGatewayOptions{
-		LANCIDR:      *lanCIDR,
-		OutInterface: *outInterface,
-		LANTarget:    *lanTarget,
-		WGInterface:  *wgInterface,
-		OverlayCIDR:  *overlayCIDR,
+		LANCIDR:        *lanCIDR,
+		OutInterface:   *outInterface,
+		LANTarget:      *lanTarget,
+		ServiceTargets: normalizeRouteList(strings.Split(*serviceTargets, ",")),
+		WGInterface:    *wgInterface,
+		OverlayCIDR:    *overlayCIDR,
 	}, *configPath, nil
 }
 
@@ -337,11 +339,12 @@ func saveSubnetGatewayConfig(configPath string, status agent.SubnetGatewayStatus
 		return err
 	}
 	opts := agent.SubnetGatewayOptions{
-		LANCIDR:      status.LANCIDR,
-		OutInterface: status.OutInterface,
-		WGInterface:  status.WGInterface,
-		OverlayCIDR:  status.OverlayCIDR,
-		LANTarget:    status.LANTarget,
+		LANCIDR:        status.LANCIDR,
+		OutInterface:   status.OutInterface,
+		WGInterface:    status.WGInterface,
+		OverlayCIDR:    status.OverlayCIDR,
+		LANTarget:      status.LANTarget,
+		ServiceTargets: append([]string(nil), status.ServiceTargets...),
 	}
 	cfg.AdvertiseRoutes = normalizeRouteList(append(cfg.AdvertiseRoutes, status.LANCIDR))
 	upserted := false

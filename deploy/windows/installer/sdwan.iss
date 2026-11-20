@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "1.2.0"
+  #define AppVersion "1.2.1"
 #endif
 
 #define AppName "SD-WAN"
@@ -59,7 +59,7 @@ Name: "{commonstartup}\SD-WAN"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{a
 [Run]
 Filename: "{app}\{#ServiceExeName}"; Parameters: "install-service --config ""{commonappdata}\sdwan\agent.json"" --auto-start=false"; StatusMsg: "正在安装 SD-WAN 后台服务..."; Flags: runhidden waituntilterminated
 Filename: "{app}\{#ServiceExeName}"; Parameters: "start-service"; StatusMsg: "正在恢复 SD-WAN 连接..."; Flags: runhidden waituntilterminated; Check: DeviceConfigExists
-Filename: "{app}\{#AppExeName}"; Description: "启动 SD-WAN"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\{#AppExeName}"; Description: "启动 SD-WAN"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#AppExeName}"; Flags: runhidden waituntilterminated; RunOnceId: "StopTray"

@@ -12,13 +12,16 @@
 - `sdwan-relay-agent` 拉取 peer 并同步 `sdwan-relay`。
 - Netmap 同时保留直连和 Relay 候选，并通过唯一 AllowedIPs 归属切换路径。
 - Relay 心跳。
+- 分层 Relay 健康状态：心跳、WireGuard 接口、Peer 同步、近期真实 Peer 握手。
+- Direct 模式下保留不承载业务 AllowedIPs 的 Relay 探测 Peer，以便验证数据面。
+- Auto 模式在 Relay 故障时回退直连；强制 Relay 模式 fail-closed，不静默绕过 Relay。
 - 30 秒直连失败切换、60 秒 Relay 最短驻留和 30 秒直连恢复。
 
 尚未实现：
 
 - 多 Relay 选择、容量调度、地域选择和高可用。
 - DERP-like 用户态流量中继协议。
-- 完整健康判断、流量统计和带宽计费。
+- Relay 转发业务探测、流量统计和带宽计费。
 
 主要代码：
 
@@ -49,6 +52,10 @@ Relay 是每个账户独立配置的逻辑节点：
 - Relay Token 只允许该 Relay 拉取所属账户 peer。
 - 同一账户当前只使用一个活动 Relay。
 - 自动模式下 Controller 同时下发直连和 Relay peer，只有目标路径拥有业务 AllowedIPs。
+
+健康状态按控制面与数据面拆分：`offline` 表示心跳过期，`degraded` 表示接口/同步/错误状态异常，`awaiting_data_plane` 表示控制面已同步但尚未观察到近期真实 WireGuard 握手，`healthy` 则要求以上均正常且最近 120 秒至少有一个 Peer 握手。握手只能证明 WireGuard 对端有响应，不能证明任意用户业务端到端可达；Agent 的本地路径验证仍是业务切换的最终依据。
+
+故障策略：`auto` 模式发现 Relay 健康失效时，在下一次 Controller Poll 协调中将期望路径转回 direct，并由两端后续 Poll/Netmap 应用完成收敛；它会跳过 Relay 最短驻留等待，但不是零中断切换。若 direct 也不可达，网络仍会中断。`relay` 强制模式保持 fail-closed，不把业务 AllowedIPs 静默放回 direct。`direct` 模式下 Relay 仅作为无业务路由的探测候选。
 
 ## 3. 控制流程
 
@@ -128,7 +135,6 @@ Relay 转发 overlay 流量通常不需要对 overlay 地址做 NAT；访问实�
   "relay_token": "relay-token-from-controller",
   "interface_name": "sdwan-relay",
   "sync_interval_seconds": 5,
-  "remove_stale_peers": false
 }
 ```
 
@@ -154,7 +160,7 @@ sudo sdwan-relay-agent --config /etc/sdwan/relay-agent.json
 - Relay 健康判断当前只基于 15 秒心跳窗口，不包含带宽和公网质量。
 - 没有多 Relay 冗余和切换。
 - Relay Agent 复用了 Bootstrap 的 `WGManager`，日志和错误命名仍带 bootstrap 语义。
-- 仓库暂未提供正式的 Relay systemd unit 和完整安装脚本。
+- 仓库提供 Linux amd64 Relay Agent 安装脚本和 systemd unit；WireGuard 接口、密钥、系统路由和防火墙仍需预先配置。
 - 没有带宽、连接数、丢包、延迟和流量统计。
 - 没有对恶意 peer、AllowedIPs 冲突和资源耗尽做完善防护。
 

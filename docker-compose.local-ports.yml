@@ -1,0 +1,7 @@
+services:
+  controller:
+    ports: !override
+      - "127.0.0.1:18081:8080"
+  web:
+    ports: !override
+      - "127.0.0.1:8082:80"

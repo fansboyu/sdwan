@@ -1,6 +1,6 @@
 # SD-WAN Controller
 
-`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.2.0`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent、子网路由和免费升级业务逻辑。
+`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.2.1`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent、子网路由和免费升级业务逻辑。
 
 生产默认控制器域名：
 
@@ -19,6 +19,8 @@ controller.englishlisten.cn
 - [Windows 客户端](docs/architecture/client-windows.md)
 
 完整部署步骤见 [docs/deployment.md](docs/deployment.md)。
+
+本地 Docker 多节点模拟环境见 [docs/simulation.md](docs/simulation.md)，可体验 Controller、Linux Hub、分支节点和 Hub 后方 LAN 的完整链路。
 
 ## 当前定位
 
@@ -70,7 +72,9 @@ controller.englishlisten.cn
 
 - 使用 userspace WireGuard + Wintun
 - 包含 Windows Service 和托盘程序
-- 支持注册、连接、断开、诊断
+- 推荐从单文件安装包安装；托盘 Join 后自动注册、安装/启动服务并连接
+- 主菜单提供加入、连接和断开，高级设置与诊断入口单独收纳
+- Windows Service 与 Linux Agent 共用 Controller poll、netmap 同步和路径状态逻辑
 - 按 Netmap 计算实际需要的路由，不再默认固定写入 `100.64.0.0/10`
 - 使用 `last_routes` 做路由差异同步和清理
 - 使用 wireguard-go UAPI 无中断切换 AllowedIPs 并上报路径状态
@@ -90,6 +94,7 @@ controller.englishlisten.cn
 - 上报 Relay 心跳
 - Relay 节点启用与业务流量模式完全分离
 - 自动模式按“客户端—主站点”链路独立 fallback
+- 可使用 `deploy/install/install-relay.sh` 安装 Linux amd64 Agent 和 systemd 服务；WireGuard 接口、路由和防火墙仍需按部署文档预先配置
 
 ## 套餐逻辑
 
@@ -248,7 +253,7 @@ db/migrations/
 Controller 启动时会自动执行 migration。当前 migration 版本：
 
 ```text
-5
+8
 ```
 
 主要迁移：
@@ -258,6 +263,10 @@ Controller 启动时会自动执行 migration。当前 migration 版本：
 - `000003_add_subscription_free_upgrade`：免费升级订阅字段
 - `000004_add_relay_mode`：Relay 模式和 Relay 节点表
 - `000005_add_email_verifications`：注册邮箱验证码
+- `000006_add_path_fallback`：按客户端路径状态机、peer stats 和 applied path
+- `000007_subnet_gateway_status`：子网网关状态上报
+- `000008_relay_health_path_quality`：Relay 健康字段和客户端本地路径质量表
+- `000009_subnet_service_probes`：主站点 LAN TCP 服务探测状态
 
 ## 主要 API
 
@@ -435,7 +444,7 @@ docker compose build
 - Controller 使用独立 PostgreSQL 或 Compose PostgreSQL
 - Web 通过 Caddy/Nginx 反向代理
 - 下载文件建议放在 `/downloads/<version>/`
-- Linux Agent 安装脚本默认使用 `SDWAN_VERSION=v1.2.0`
+- Linux Agent 安装脚本默认使用 `SDWAN_VERSION=v1.2.1`
 - Controller 需要配置强随机 `ADMIN_JWT_SECRET`
 - Bootstrap 和 Relay Token 必须独立生成并妥善保存
 

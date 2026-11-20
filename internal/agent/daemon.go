@@ -45,48 +45,20 @@ func RunDaemon(ctx context.Context, opts DaemonOptions) error {
 }
 
 func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDetector, forceApply bool) (time.Duration, error) {
-	cfg, err := LoadConfig(opts.ConfigPath)
-	if err != nil {
-		return 0, err
-	}
-	if cfg.LastConfigPath == "" {
-		cfg.LastConfigPath = opts.WGPath
-	}
-
-	client := NewAPIClient(cfg.ControllerURL)
-	endpoints := detector.Detect(ctx, cfg)
-	peerStats, _ := CollectPeerStats(cfg.InterfaceName)
-	subnetGateways := collectSubnetGatewayStatuses(cfg)
-
-	pollResp, err := client.Poll(ctx, cfg.DeviceToken, PollRequest{
-		CurrentNetmapVersion: cfg.NetmapVersion,
-		ClientVersion:        cfg.ClientVersion,
-		OSVersion:            cfg.OSVersion,
-		Endpoints:            endpoints,
-		AdvertiseRoutes:      cfg.AdvertiseRoutes,
-		SubnetGateways:       subnetGateways,
-		PeerStats:            peerStats,
-		AppliedPaths:         cfg.AppliedPaths,
+	return RunSyncCycle(ctx, SyncCycleOptions{
+		ConfigPath:            opts.ConfigPath,
+		WGPath:                opts.WGPath,
+		Detector:              detector,
+		ForceApply:            forceApply,
+		IncludeSubnetGateways: true,
+		ApplyNetmap: func(ctx context.Context, cfg *Config, netmap Netmap) error {
+			return applyNetmap(ctx, opts, cfg, netmap)
+		},
 	})
-	if err != nil {
-		return 0, err
-	}
+}
 
-	interval := time.Duration(pollResp.PollIntervalSeconds) * time.Second
-	if interval <= 0 {
-		interval = 15 * time.Second
-	}
-
-	if !pollResp.NetmapChanged && !forceApply {
-		log.Printf("poll ok: status=%s version=%d endpoints=%d", pollResp.DeviceStatus, pollResp.NetmapVersion, len(endpoints))
-		return interval, nil
-	}
-
-	netmap, err := client.Netmap(ctx, cfg.DeviceToken)
-	if err != nil {
-		return interval, err
-	}
-
+func applyNetmap(ctx context.Context, opts DaemonOptions, cfg *Config, netmap Netmap) error {
+	_ = ctx
 	content, err := RenderWireGuardConfig(WGRenderInput{
 		PrivateKey:    cfg.PrivateKey,
 		VirtualIP:     cfg.VirtualIP,
@@ -95,29 +67,24 @@ func runDaemonOnce(ctx context.Context, opts DaemonOptions, detector EndpointDet
 		Netmap:        netmap,
 	})
 	if err != nil {
-		return interval, err
+		return err
 	}
 	if err := WriteWireGuardConfig(opts.WGPath, content); err != nil {
-		return interval, err
+		return err
 	}
 
 	if opts.Apply {
-		result, err := ApplyWireGuardConfigSmart(cfg, opts.WGPath, netmap)
+		result, err := ApplyWireGuardConfigSmart(*cfg, opts.WGPath, netmap)
 		if err != nil {
-			return interval, err
+			return err
 		}
 		cfg.LastRoutes = result.LastRoutes
 	}
 
 	cfg.NetmapVersion = netmap.Version
-	cfg.AppliedPaths = appliedPaths(netmap.PathAssignments)
+	cfg.AppliedPaths = AppliedPathReports(ctx, netmap)
 	cfg.LastConfigPath = filepath.Clean(opts.WGPath)
-	if err := SaveConfig(opts.ConfigPath, cfg); err != nil {
-		return interval, err
-	}
-	log.Printf("netmap applied: version=%d role=%s peers=%d endpoints=%d bootstrap=%v apply=%v",
-		netmap.Version, defaultString(netmap.Self.SiteRole, "client"), len(netmap.Peers), len(endpoints), netmap.BootstrapPeer != nil, opts.Apply)
-	return interval, nil
+	return nil
 }
 
 func collectSubnetGatewayStatuses(cfg Config) []SubnetGatewayStatus {
@@ -133,14 +100,6 @@ func collectSubnetGatewayStatuses(cfg Config) []SubnetGatewayStatus {
 		items = append(items, status)
 	}
 	return items
-}
-
-func appliedPaths(assignments []PathAssignment) []AppliedPath {
-	result := make([]AppliedPath, 0, len(assignments))
-	for _, item := range assignments {
-		result = append(result, AppliedPath{ClientDeviceID: item.ClientDeviceID, Generation: item.Generation})
-	}
-	return result
 }
 
 func defaultString(value, fallback string) string {

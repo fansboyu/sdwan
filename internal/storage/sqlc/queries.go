@@ -498,7 +498,7 @@ func (q *Queries) ListSubnetRoutesByUser(ctx context.Context, userID string) ([]
 	rows, err := q.db.Query(ctx, `SELECT id, user_id, device_id, cidr::text, status, advertised, approved,
        gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
        gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
-       created_at, updated_at
+       gateway_history::text, created_at, updated_at
 FROM subnet_routes
 WHERE user_id = $1
 ORDER BY created_at DESC`, userID)
@@ -521,7 +521,7 @@ func (q *Queries) ListActiveSubnetRoutesByUser(ctx context.Context, userID strin
 	rows, err := q.db.Query(ctx, `SELECT id, user_id, device_id, cidr::text, status, advertised, approved,
        gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
        gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
-       created_at, updated_at
+       gateway_history::text, created_at, updated_at
 FROM subnet_routes
 WHERE user_id = $1
   AND status = 'active'
@@ -581,6 +581,7 @@ type UpdateSubnetGatewayStatusParams struct {
 	GatewayRouteInterface string
 	GatewayLANTarget      string
 	GatewayLANReachable   bool
+	GatewayServiceStatus  string
 }
 
 func (q *Queries) UpdateSubnetGatewayStatus(ctx context.Context, arg UpdateSubnetGatewayStatusParams) (bool, error) {
@@ -593,6 +594,7 @@ func (q *Queries) UpdateSubnetGatewayStatus(ctx context.Context, arg UpdateSubne
       gateway_route_interface = $7,
       gateway_lan_target = $8,
       gateway_lan_reachable = $9,
+      gateway_service_status = $10,
       updated_at = now()
   WHERE user_id = $1
     AND device_id = $2
@@ -604,18 +606,74 @@ func (q *Queries) UpdateSubnetGatewayStatus(ctx context.Context, arg UpdateSubne
       OR gateway_route_interface IS DISTINCT FROM $7
       OR gateway_lan_target IS DISTINCT FROM $8
       OR gateway_lan_reachable IS DISTINCT FROM $9
+      OR gateway_service_status IS DISTINCT FROM $10
     )
   RETURNING 1
 )
-SELECT EXISTS(SELECT 1 FROM updated)`, arg.UserID, arg.DeviceID, arg.Cidr, arg.GatewayEnabled, arg.GatewayError, arg.GatewayOutInterface, arg.GatewayRouteInterface, arg.GatewayLANTarget, arg.GatewayLANReachable)
+SELECT EXISTS(SELECT 1 FROM updated)`, arg.UserID, arg.DeviceID, arg.Cidr, arg.GatewayEnabled, arg.GatewayError, arg.GatewayOutInterface, arg.GatewayRouteInterface, arg.GatewayLANTarget, arg.GatewayLANReachable, arg.GatewayServiceStatus)
 	var changed bool
 	err := row.Scan(&changed)
 	return changed, err
 }
 
+func (q *Queries) ListSubnetGatewayServiceStatusByUser(ctx context.Context, userID string) (map[string]string, error) {
+	rows, err := q.db.Query(ctx, `SELECT cidr::text, gateway_service_status FROM subnet_routes WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[string]string{}
+	for rows.Next() {
+		var cidr, status string
+		if err := rows.Scan(&cidr, &status); err != nil {
+			return nil, err
+		}
+		result[cidr] = status
+	}
+	return result, rows.Err()
+}
+
+func (q *Queries) RecordSubnetRouteConflict(ctx context.Context, id, userID, deviceID, cidr, details string) error {
+	_, err := q.db.Exec(ctx, `INSERT INTO subnet_route_conflicts (id, user_id, device_id, cidr, details)
+SELECT $1, $2, $3, $4::cidr, $5
+WHERE NOT EXISTS (
+  SELECT 1 FROM subnet_route_conflicts
+  WHERE device_id = $3 AND cidr = $4::cidr AND details = $5 AND resolved_at IS NULL
+)
+ON CONFLICT DO NOTHING`, id, userID, deviceID, cidr, details)
+	return err
+}
+
+func (q *Queries) ResolveSubnetRouteConflicts(ctx context.Context, deviceID string) error {
+	_, err := q.db.Exec(ctx, `UPDATE subnet_route_conflicts
+SET resolved_at = now()
+WHERE device_id = $1 AND resolved_at IS NULL`, deviceID)
+	return err
+}
+
+func (q *Queries) ListSubnetRouteConflictsByUser(ctx context.Context, userID string) ([]SubnetRouteConflict, error) {
+	rows, err := q.db.Query(ctx, `SELECT id, device_id, cidr::text, details, created_at, resolved_at
+FROM subnet_route_conflicts WHERE user_id = $1
+ORDER BY created_at DESC LIMIT 50`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SubnetRouteConflict
+	for rows.Next() {
+		var item SubnetRouteConflict
+		if err := rows.Scan(&item.ID, &item.DeviceID, &item.CIDR, &item.Details, &item.CreatedAt, &item.ResolvedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (q *Queries) DisableDeviceSubnetRoutesNotIn(ctx context.Context, deviceID string, cidrs []string) (int64, error) {
 	result, err := q.db.Exec(ctx, `UPDATE subnet_routes
 SET advertised = false,
+    approved = false,
     status = 'inactive',
     updated_at = now()
 WHERE device_id = $1
@@ -630,6 +688,7 @@ WHERE device_id = $1
 func (q *Queries) DisableSubnetRoutesExceptDevice(ctx context.Context, userID, deviceID string) (int64, error) {
 	result, err := q.db.Exec(ctx, `UPDATE subnet_routes
 SET advertised = false,
+    approved = false,
     status = 'inactive',
     updated_at = now()
 WHERE user_id = $1
@@ -655,7 +714,7 @@ WHERE id = $1
 RETURNING id, user_id, device_id, cidr::text, status, advertised, approved,
           gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
           gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
-          created_at, updated_at`, id, userID, approved)
+          gateway_history::text, created_at, updated_at`, id, userID, approved)
 	var r SubnetRoute
 	err := scanSubnetRouteRow(row, &r)
 	return r, err
@@ -664,6 +723,7 @@ RETURNING id, user_id, device_id, cidr::text, status, advertised, approved,
 func (q *Queries) DisableSubnetRoute(ctx context.Context, id, userID string) (SubnetRoute, error) {
 	row := q.db.QueryRow(ctx, `UPDATE subnet_routes
 SET advertised = false,
+    approved = false,
     status = 'inactive',
     updated_at = now()
 WHERE id = $1
@@ -671,7 +731,7 @@ WHERE id = $1
 RETURNING id, user_id, device_id, cidr::text, status, advertised, approved,
           gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
           gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
-          created_at, updated_at`, id, userID)
+          gateway_history::text, created_at, updated_at`, id, userID)
 	var r SubnetRoute
 	err := scanSubnetRouteRow(row, &r)
 	return r, err
@@ -701,13 +761,15 @@ func scanSubnetRouteRow(row subnetRouteScanner, r *SubnetRoute) error {
 		&r.GatewayRouteInterface,
 		&r.GatewayLANTarget,
 		&r.GatewayLANReachable,
+		&r.GatewayHistory,
 		&r.CreatedAt,
 		&r.UpdatedAt,
 	)
 }
 
 func (q *Queries) ListRelaysByUser(ctx context.Context, userID string) ([]Relay, error) {
-	rows, err := q.db.Query(ctx, `SELECT id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at, created_at
+	rows, err := q.db.Query(ctx, `SELECT id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at,
+		interface_up, synced_peer_count, version, last_error, last_sync_at, sync_ok, handshake_peer_count, last_handshake_at, created_at
 FROM relays
 WHERE user_id = $1
 ORDER BY created_at DESC`, userID)
@@ -718,7 +780,7 @@ ORDER BY created_at DESC`, userID)
 	var items []Relay
 	for rows.Next() {
 		var r Relay
-		if err := rows.Scan(&r.ID, &r.UserID, &r.Name, &r.PublicKey, &r.VirtualIP, &r.Endpoint, &r.Status, &r.LastSeenAt, &r.CreatedAt); err != nil {
+		if err := scanRelay(rows, &r); err != nil {
 			return nil, err
 		}
 		items = append(items, r)
@@ -739,40 +801,44 @@ type CreateRelayParams struct {
 func (q *Queries) CreateRelay(ctx context.Context, arg CreateRelayParams) (Relay, error) {
 	row := q.db.QueryRow(ctx, `INSERT INTO relays (id, user_id, name, public_key, relay_token_hash, virtual_ip, endpoint, status)
 VALUES ($1, $2, $3, $4, $5, $6::inet, $7, 'pending')
-RETURNING id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at, created_at`,
+RETURNING id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at,
+		  interface_up, synced_peer_count, version, last_error, last_sync_at, sync_ok, handshake_peer_count, last_handshake_at, created_at`,
 		arg.ID, arg.UserID, arg.Name, arg.PublicKey, arg.RelayTokenHash, arg.VirtualIP, arg.Endpoint)
 	var r Relay
-	err := row.Scan(&r.ID, &r.UserID, &r.Name, &r.PublicKey, &r.VirtualIP, &r.Endpoint, &r.Status, &r.LastSeenAt, &r.CreatedAt)
+	err := scanRelay(row, &r)
 	return r, err
 }
 
 func (q *Queries) GetRelay(ctx context.Context, id string) (Relay, error) {
-	row := q.db.QueryRow(ctx, `SELECT id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at, created_at
+	row := q.db.QueryRow(ctx, `SELECT id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at,
+       interface_up, synced_peer_count, version, last_error, last_sync_at, sync_ok, handshake_peer_count, last_handshake_at, created_at
 FROM relays
 WHERE id = $1`, id)
 	var r Relay
-	err := row.Scan(&r.ID, &r.UserID, &r.Name, &r.PublicKey, &r.VirtualIP, &r.Endpoint, &r.Status, &r.LastSeenAt, &r.CreatedAt)
+	err := scanRelay(row, &r)
 	return r, err
 }
 
 func (q *Queries) GetRelayByTokenHash(ctx context.Context, tokenHash string) (Relay, error) {
-	row := q.db.QueryRow(ctx, `SELECT id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at, created_at
+	row := q.db.QueryRow(ctx, `SELECT id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at,
+       interface_up, synced_peer_count, version, last_error, last_sync_at, sync_ok, handshake_peer_count, last_handshake_at, created_at
 FROM relays
 WHERE relay_token_hash = $1`, tokenHash)
 	var r Relay
-	err := row.Scan(&r.ID, &r.UserID, &r.Name, &r.PublicKey, &r.VirtualIP, &r.Endpoint, &r.Status, &r.LastSeenAt, &r.CreatedAt)
+	err := scanRelay(row, &r)
 	return r, err
 }
 
 func (q *Queries) GetActiveRelayByUser(ctx context.Context, userID string) (Relay, error) {
-	row := q.db.QueryRow(ctx, `SELECT id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at, created_at
+	row := q.db.QueryRow(ctx, `SELECT id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at,
+       interface_up, synced_peer_count, version, last_error, last_sync_at, sync_ok, handshake_peer_count, last_handshake_at, created_at
 FROM relays
 WHERE user_id = $1
   AND status = 'active'
 ORDER BY created_at DESC
 LIMIT 1`, userID)
 	var r Relay
-	err := row.Scan(&r.ID, &r.UserID, &r.Name, &r.PublicKey, &r.VirtualIP, &r.Endpoint, &r.Status, &r.LastSeenAt, &r.CreatedAt)
+	err := scanRelay(row, &r)
 	return r, err
 }
 
@@ -792,15 +858,61 @@ func (q *Queries) SetRelayStatus(ctx context.Context, id, userID, status string)
 SET status = $3
 WHERE id = $1
   AND user_id = $2
-RETURNING id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at, created_at`, id, userID, status)
+RETURNING id, user_id, name, public_key, host(virtual_ip), endpoint, status, last_seen_at,
+		  interface_up, synced_peer_count, version, last_error, last_sync_at, sync_ok, handshake_peer_count, last_handshake_at, created_at`, id, userID, status)
 	var r Relay
-	err := row.Scan(&r.ID, &r.UserID, &r.Name, &r.PublicKey, &r.VirtualIP, &r.Endpoint, &r.Status, &r.LastSeenAt, &r.CreatedAt)
+	err := scanRelay(row, &r)
 	return r, err
 }
 
-func (q *Queries) UpdateRelayHeartbeat(ctx context.Context, id string) error {
+type RelayHeartbeatParams struct {
+	ID                 string
+	InterfaceUp        bool
+	SyncedPeerCount    int32
+	HandshakePeerCount int32
+	LastHandshakeAt    *time.Time
+	Version            string
+	LastError          string
+	SyncOK             bool
+}
+
+func (q *Queries) UpdateRelayHeartbeat(ctx context.Context, arg RelayHeartbeatParams) error {
 	_, err := q.db.Exec(ctx, `UPDATE relays
-SET last_seen_at = now()
-WHERE id = $1`, id)
+SET last_seen_at = now(),
+    interface_up = $2,
+    synced_peer_count = $3,
+    handshake_peer_count = $4,
+    last_handshake_at = $5,
+    version = $6,
+    last_error = $7,
+    sync_ok = $8,
+    last_sync_at = CASE WHEN $8 THEN now() ELSE last_sync_at END
+WHERE id = $1`, arg.ID, arg.InterfaceUp, arg.SyncedPeerCount, arg.HandshakePeerCount, arg.LastHandshakeAt, arg.Version, arg.LastError, arg.SyncOK)
 	return err
+}
+
+type relayScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRelay(row relayScanner, r *Relay) error {
+	return row.Scan(
+		&r.ID,
+		&r.UserID,
+		&r.Name,
+		&r.PublicKey,
+		&r.VirtualIP,
+		&r.Endpoint,
+		&r.Status,
+		&r.LastSeenAt,
+		&r.InterfaceUp,
+		&r.SyncedPeerCount,
+		&r.Version,
+		&r.LastError,
+		&r.LastSyncAt,
+		&r.SyncOK,
+		&r.HandshakePeerCount,
+		&r.LastHandshakeAt,
+		&r.CreatedAt,
+	)
 }

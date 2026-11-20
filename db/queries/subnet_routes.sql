@@ -2,7 +2,7 @@
 SELECT id, user_id, device_id, cidr::text, status, advertised, approved,
        gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
        gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
-       created_at, updated_at
+       gateway_history::text, created_at, updated_at
 FROM subnet_routes
 WHERE user_id = $1
 ORDER BY created_at DESC;
@@ -11,7 +11,7 @@ ORDER BY created_at DESC;
 SELECT id, user_id, device_id, cidr::text, status, advertised, approved,
        gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
        gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
-       created_at, updated_at
+       gateway_history::text, created_at, updated_at
 FROM subnet_routes
 WHERE user_id = $1
   AND status = 'active'
@@ -46,6 +46,7 @@ WITH updated AS (
       gateway_route_interface = $7,
       gateway_lan_target = $8,
       gateway_lan_reachable = $9,
+      gateway_service_status = $10,
       updated_at = now()
   WHERE user_id = $1
     AND device_id = $2
@@ -57,14 +58,38 @@ WITH updated AS (
       OR gateway_route_interface IS DISTINCT FROM $7
       OR gateway_lan_target IS DISTINCT FROM $8
       OR gateway_lan_reachable IS DISTINCT FROM $9
+      OR gateway_service_status IS DISTINCT FROM $10
     )
   RETURNING 1
 )
 SELECT EXISTS(SELECT 1 FROM updated);
 
+-- name: ListSubnetGatewayServiceStatusByUser :many
+SELECT cidr::text, gateway_service_status
+FROM subnet_routes
+WHERE user_id = $1;
+
+-- name: RecordSubnetRouteConflict :exec
+INSERT INTO subnet_route_conflicts (id, user_id, device_id, cidr, details)
+VALUES ($1, $2, $3, $4::cidr, $5)
+ON CONFLICT DO NOTHING;
+
+-- name: ResolveSubnetRouteConflicts :exec
+UPDATE subnet_route_conflicts
+SET resolved_at = now()
+WHERE device_id = $1 AND resolved_at IS NULL;
+
+-- name: ListSubnetRouteConflictsByUser :many
+SELECT id, device_id, cidr::text, details, created_at, resolved_at
+FROM subnet_route_conflicts
+WHERE user_id = $1
+ORDER BY created_at DESC
+LIMIT 50;
+
 -- name: DisableDeviceSubnetRoutesNotIn :execrows
 UPDATE subnet_routes
 SET advertised = false,
+    approved = false,
     status = 'inactive',
     updated_at = now()
 WHERE device_id = $1
@@ -74,6 +99,7 @@ WHERE device_id = $1
 -- name: DisableSubnetRoutesExceptDevice :execrows
 UPDATE subnet_routes
 SET advertised = false,
+    approved = false,
     status = 'inactive',
     updated_at = now()
 WHERE user_id = $1
@@ -94,11 +120,12 @@ WHERE id = $1
 RETURNING id, user_id, device_id, cidr::text, status, advertised, approved,
           gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
           gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
-          created_at, updated_at;
+          gateway_history::text, created_at, updated_at;
 
 -- name: DisableSubnetRoute :one
 UPDATE subnet_routes
 SET advertised = false,
+    approved = false,
     status = 'inactive',
     updated_at = now()
 WHERE id = $1
@@ -106,4 +133,4 @@ WHERE id = $1
 RETURNING id, user_id, device_id, cidr::text, status, advertised, approved,
           gateway_enabled, gateway_error, gateway_checked_at, gateway_out_interface,
           gateway_route_interface, gateway_lan_target, gateway_lan_reachable,
-          created_at, updated_at;
+          gateway_history::text, created_at, updated_at;

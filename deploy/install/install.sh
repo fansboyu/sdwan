@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-VERSION="${SDWAN_VERSION:-v1.2.0}"
+VERSION="${SDWAN_VERSION:-v1.2.1}"
 CONTROLLER_URL="${SDWAN_CONTROLLER_URL:-https://controller.englishlisten.cn}"
 DOWNLOAD_BASE="${SDWAN_DOWNLOAD_BASE:-${CONTROLLER_URL}/downloads/${VERSION}}"
 BIN_NAME="sdwan-agent-linux-amd64"
@@ -42,23 +42,23 @@ detect_platform() {
 install_deps() {
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl wireguard-tools
+    DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl wireguard-tools iputils-ping
     return
   fi
   if command -v dnf >/dev/null 2>&1; then
-    dnf install -y ca-certificates curl wireguard-tools
+    dnf install -y ca-certificates curl wireguard-tools iputils
     return
   fi
   if command -v yum >/dev/null 2>&1; then
-    yum install -y ca-certificates curl wireguard-tools
+    yum install -y ca-certificates curl wireguard-tools iputils
     return
   fi
   if command -v apk >/dev/null 2>&1; then
-    apk add --no-cache ca-certificates curl wireguard-tools
+    apk add --no-cache ca-certificates curl wireguard-tools iputils
     return
   fi
   if command -v pacman >/dev/null 2>&1; then
-    pacman -Sy --noconfirm ca-certificates curl wireguard-tools
+    pacman -Sy --noconfirm ca-certificates curl wireguard-tools iputils
     return
   fi
   log "No supported package manager found. Please install curl and wireguard-tools manually."

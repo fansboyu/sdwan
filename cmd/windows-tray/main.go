@@ -86,15 +86,16 @@ func (a *trayApp) onReady() {
 
 	joinItem := systray.AddMenuItem("Join from Clipboard", "Copy Admin Token, then click this")
 	connectItem := systray.AddMenuItem("Connect", "Start Windows service")
-	syncItem := systray.AddMenuItem("Restart Service", "Restart Windows service")
 	disconnectItem := systray.AddMenuItem("Disconnect", "Stop Windows service")
-	a.autoItem = systray.AddMenuItemCheckbox("Auto Start", "Start service when tray opens", a.config.AutoSync)
 	systray.AddSeparator()
 
-	editItem := systray.AddMenuItem("Edit Settings", "Open tray.json in Notepad")
-	folderItem := systray.AddMenuItem("Open Config Folder", "Open C:\\ProgramData\\sdwan")
-	a.startupItem = systray.AddMenuItemCheckbox("Start with Windows", "Install Startup shortcut", a.isStartupInstalled())
-	aboutItem := systray.AddMenuItem("About", "Show version")
+	advancedItem := systray.AddMenuItem("Advanced", "Service controls and configuration")
+	syncItem := advancedItem.AddSubMenuItem("Restart Service", "Restart Windows service")
+	a.autoItem = advancedItem.AddSubMenuItemCheckbox("Auto Start", "Start service when tray opens", a.config.AutoSync)
+	editItem := advancedItem.AddSubMenuItem("Edit Settings", "Open tray.json in Notepad")
+	folderItem := advancedItem.AddSubMenuItem("Open Config Folder", "Open C:\\ProgramData\\sdwan")
+	a.startupItem = advancedItem.AddSubMenuItemCheckbox("Start with Windows", "Install Startup shortcut", a.isStartupInstalled())
+	aboutItem := advancedItem.AddSubMenuItem("About", "Show version")
 	systray.AddSeparator()
 	quitItem := systray.AddMenuItem("Exit", "Exit tray")
 

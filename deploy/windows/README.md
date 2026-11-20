@@ -8,7 +8,18 @@ sdwan-tray.exe -> SDWANService/sdwan-service.exe -> wireguard-go -> Wintun
 
 也就是说：不再要求用户额外安装 WireGuard for Windows。客户端自己启动用户态 WireGuard，并通过 Wintun 创建 Windows 虚拟网卡。
 
-## 文件清单
+## 普通用户：安装并入网
+
+Windows 客户端的推荐入口是安装包和托盘程序。不要单独运行旧的 `sdwan-agent.exe`。
+
+1. 运行发布版 `SD-WAN-Setup-v<版本>-x64.exe`，按向导完成安装。
+2. 安装完成后使用安装器启动的托盘程序（以管理员权限运行）。手动启动时也请以管理员身份运行。
+3. 登录 Web 管理台并复制 `Admin Token`。
+4. 右键托盘图标，选择 **Join from Clipboard**。注册成功后会自动安装/启动后台服务并连接，无需再单独点击 Connect。
+
+之后可从托盘查看 Joined / Connected 状态，使用 Connect 或 Disconnect 控制连接。退出托盘不会断开隧道。
+
+## 发布文件
 
 发布目录建议如下：
 
@@ -35,14 +46,14 @@ sdwan-windows-ui.ps1         旧 PowerShell 简单窗口
 sdwan-windows-tray.ps1       旧 PowerShell 托盘
 ```
 
-当前优先使用 `sdwan-tray.exe + sdwan-service.exe`。
+当前推荐通过安装包分发；手动部署时使用 `sdwan-tray.exe + sdwan-service.exe + wintun.dll`。
 
 ## 推荐安装包
 
 普通用户不需要再手工复制三个文件。可使用 Inno Setup 构建单文件安装包：
 
 ```text
-dist\windows\SD-WAN-Setup-v1.2.0-x64.exe
+dist\windows\SD-WAN-Setup-v1.2.1-x64.exe
 ```
 
 在项目根目录执行：
@@ -61,7 +72,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy\windows\build-installer.ps1
 6. 创建开始菜单快捷方式，并可选创建桌面和开机启动快捷方式。
 7. 安装完成后启动托盘，但不会在设备注册前启动后台隧道。
 
-用户入网流程保持不变：登录 Web 管理台，复制 Admin Token，在托盘中点击 `Join from Clipboard`，然后点击 `Connect`。
+用户入网流程：登录 Web 管理台，复制 Admin Token，在托盘中点击 `Join from Clipboard`。托盘会在注册成功后自动启动服务并连接。
 
 卸载时会停止并移除 Windows Service，但默认保留 `C:\ProgramData\sdwan`，方便以后升级或重新安装。需要彻底清除设备身份时再手工删除该目录。
 
@@ -101,7 +112,7 @@ go build -o build\windows\sdwan-agent.exe .\cmd\agent
 build\windows\wintun.dll
 ```
 
-## 启动步骤
+## 手动部署（维护与排障）
 
 推荐使用管理员 PowerShell：
 
@@ -117,7 +128,7 @@ cd C:\sdwan
 3. 复制页面里的 `Admin Token`。
 4. 右键 Windows 托盘里的 `SD-WAN` 图标。
 5. 点击 `Join from Clipboard`。
-6. 再点击 `Connect`。
+6. 等待托盘自动安装/启动后台服务并连接；Connect 可用于后续手动重连。
 
 连接成功后，客户端会完成：
 
@@ -132,27 +143,22 @@ cd C:\sdwan
 8. 添加 overlay 路由
 ```
 
-## 托盘菜单说明
+## 托盘菜单
 
 ```text
 Joined               只读状态，打勾表示本机已经注册并生成 agent.json
 Connected            只读状态，打勾表示 SDWANService 正在运行
 Join from Clipboard  从剪贴板读取 Admin Token 并注册入网
 Connect              自动安装并启动 Windows 服务 SDWANService
-Restart Service      重启 SDWANService
 Disconnect           停止 SDWANService
-Auto Start           托盘启动后自动启动服务
-Edit Settings        打开 C:\ProgramData\sdwan\tray.json
-Open Config Folder   打开 C:\ProgramData\sdwan
-Start with Windows   添加开机启动命令
-About                显示版本
+Advanced             重启服务、设置、配置目录、开机启动和版本信息
 Exit                 退出托盘程序
 ```
 
 说明：
 
 ```text
-Joined / Connected 是状态提示，不是操作按钮。
+Joined / Connected 是状态提示，不是操作按钮。高级选项收在 Advanced 子菜单中。
 Auto Start / Start with Windows 是可切换选项，点击后会根据结果自动打勾或取消打勾。
 托盘程序会周期性刷新状态，因此服务被外部命令启动或停止后，菜单勾选也会自动更新。
 ```
@@ -408,7 +414,6 @@ bootstrap peer 接入
 暂未完成：
 
 ```text
-安装包
 代码签名
 完整 GUI 设置页
 服务日志查看页

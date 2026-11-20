@@ -106,7 +106,6 @@ Bootstrap Agent：`/etc/sdwan/bootstrap-agent.json`
   "interface_name": "sdwan-bootstrap",
   "sync_interval_seconds": 5,
   "report_interval_seconds": 2,
-  "remove_stale_peers": false
 }
 ```
 

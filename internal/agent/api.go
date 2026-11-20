@@ -55,6 +55,7 @@ type PollRequest struct {
 	AdvertiseRoutes      []string              `json:"advertise_routes"`
 	SubnetGateways       []SubnetGatewayStatus `json:"subnet_gateways,omitempty"`
 	PeerStats            []PeerStat            `json:"peer_stats,omitempty"`
+	PathQuality          []PathQualityReport   `json:"path_quality,omitempty"`
 	AppliedPaths         []AppliedPath         `json:"applied_paths,omitempty"`
 }
 
@@ -73,8 +74,19 @@ type Netmap struct {
 	Peers           []NetmapPeer     `json:"peers"`
 	BootstrapPeer   *NetmapPeer      `json:"bootstrap_peer,omitempty"`
 	PathMode        string           `json:"path_mode"`
+	RelayPolicy     string           `json:"relay_policy"`
+	RelayCandidates []RelayCandidate `json:"relay_candidates,omitempty"`
 	PathGeneration  int64            `json:"path_generation"`
 	PathAssignments []PathAssignment `json:"path_assignments,omitempty"`
+}
+
+type RelayCandidate struct {
+	RelayID   string `json:"relay_id"`
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+	VirtualIP string `json:"virtual_ip"`
+	Endpoint  string `json:"endpoint"`
+	Healthy   bool   `json:"healthy"`
 }
 
 type NetmapSelf struct {
@@ -105,14 +117,37 @@ type PeerStat struct {
 }
 
 type AppliedPath struct {
-	ClientDeviceID string `json:"client_device_id"`
-	Generation     int64  `json:"generation"`
+	ClientDeviceID     string `json:"client_device_id"`
+	Generation         int64  `json:"generation"`
+	EffectivePath      string `json:"effective_path"`
+	VerificationStatus string `json:"verification_status"`
+	VerificationError  string `json:"verification_error,omitempty"`
+}
+
+type PathQualityReport struct {
+	PeerDeviceID      string     `json:"peer_device_id"`
+	PathType          string     `json:"path_type"`
+	CurrentPath       bool       `json:"current_path"`
+	Endpoint          string     `json:"endpoint"`
+	LatestHandshakeAt *time.Time `json:"latest_handshake_at,omitempty"`
+	RxBytes           int64      `json:"rx_bytes"`
+	TxBytes           int64      `json:"tx_bytes"`
+	LastRxAt          *time.Time `json:"last_rx_at,omitempty"`
+	FailCount         int32      `json:"fail_count"`
+	LastOKAt          *time.Time `json:"last_ok_at,omitempty"`
+	LastFailedAt      *time.Time `json:"last_failed_at,omitempty"`
 }
 type PathAssignment struct {
-	ClientDeviceID string `json:"client_device_id"`
-	DesiredPath    string `json:"desired_path"`
-	State          string `json:"state"`
-	Generation     int64  `json:"generation"`
+	ClientDeviceID     string     `json:"client_device_id"`
+	PeerVirtualIP      string     `json:"peer_virtual_ip"`
+	DesiredPath        string     `json:"desired_path"`
+	State              string     `json:"state"`
+	Generation         int64      `json:"generation"`
+	VerifiedPath       string     `json:"verified_path"`
+	VerifiedGeneration int64      `json:"verified_generation"`
+	VerificationState  string     `json:"verification_state"`
+	VerificationError  string     `json:"verification_error"`
+	VerifiedAt         *time.Time `json:"verified_at,omitempty"`
 }
 
 func (c *APIClient) Register(ctx context.Context, req RegisterRequest) (RegisterResponse, error) {

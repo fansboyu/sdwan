@@ -192,7 +192,8 @@ func runSync(args []string) error {
 	}
 	runner := &serviceRunner{configPath: *configPath, routeCIDR: *routeCIDR}
 	defer runner.Close()
-	return runner.RunOnce(context.Background())
+	_, err := runner.RunOnce(context.Background())
+	return err
 }
 
 func runDown(args []string) error {
@@ -432,11 +433,16 @@ func (h *windowsServiceHandler) Execute(_ []string, r <-chan svc.ChangeRequest, 
 func (r *serviceRunner) Run(ctx context.Context) error {
 	interval := 2 * time.Second
 	for {
-		if err := r.RunOnce(ctx); err != nil {
+		nextInterval, err := r.RunOnce(ctx)
+		if err != nil {
 			log.Printf("sync failed: %v", err)
 			interval = 15 * time.Second
 		} else {
-			interval = r.nextInterval()
+			if nextInterval > 0 {
+				interval = nextInterval
+			} else {
+				interval = 15 * time.Second
+			}
 		}
 
 		select {
@@ -448,52 +454,22 @@ func (r *serviceRunner) Run(ctx context.Context) error {
 	}
 }
 
-func (r *serviceRunner) RunOnce(ctx context.Context) error {
-	cfg, err := agent.LoadConfig(r.configPath)
-	if err != nil {
-		return err
-	}
-	client := agent.NewAPIClient(cfg.ControllerURL)
-	detector := agent.EndpointDetector{Timeout: 3 * time.Second}
-	endpoints := detector.Detect(ctx, cfg)
-	peerStats := r.peerStats()
-
-	pollResp, err := client.Poll(ctx, cfg.DeviceToken, agent.PollRequest{
-		CurrentNetmapVersion: cfg.NetmapVersion,
-		ClientVersion:        version.Version,
-		OSVersion:            cfg.OSVersion,
-		Endpoints:            endpoints,
-		AdvertiseRoutes:      cfg.AdvertiseRoutes,
-		PeerStats:            peerStats,
-		AppliedPaths:         cfg.AppliedPaths,
+func (r *serviceRunner) RunOnce(ctx context.Context) (time.Duration, error) {
+	return agent.RunSyncCycle(ctx, agent.SyncCycleOptions{
+		ConfigPath:    r.configPath,
+		ClientVersion: version.Version,
+		PeerStats:     r.peerStats(),
+		IsStarted:     r.isStarted,
+		ApplyNetmap: func(_ context.Context, cfg *agent.Config, netmap agent.Netmap) error {
+			appliedCfg, err := r.applyNetmap(*cfg, netmap)
+			if err != nil {
+				r.Close()
+				return err
+			}
+			*cfg = appliedCfg
+			return nil
+		},
 	})
-	if err != nil {
-		return err
-	}
-	if !pollResp.NetmapChanged && r.isStarted() {
-		log.Printf("poll ok: version=%d endpoints=%d", pollResp.NetmapVersion, len(endpoints))
-		return nil
-	}
-
-	netmap, err := client.Netmap(ctx, cfg.DeviceToken)
-	if err != nil {
-		return err
-	}
-	appliedCfg, err := r.applyNetmap(cfg, netmap)
-	if err != nil {
-		r.Close()
-		return err
-	}
-	cfg = appliedCfg
-	cfg.NetmapVersion = netmap.Version
-	cfg.AppliedPaths = windowsAppliedPaths(netmap.PathAssignments)
-	cfg.ClientVersion = version.Version
-	if err := agent.SaveConfig(r.configPath, cfg); err != nil {
-		return err
-	}
-	log.Printf("netmap applied: version=%d role=%s peers=%d endpoints=%d bootstrap=%v",
-		netmap.Version, defaultString(netmap.Self.SiteRole, "client"), len(netmap.Peers), len(endpoints), netmap.BootstrapPeer != nil)
-	return nil
 }
 
 func (r *serviceRunner) applyNetmap(cfg agent.Config, netmap agent.Netmap) (agent.Config, error) {
@@ -560,14 +536,6 @@ func (r *serviceRunner) isStarted() bool {
 	return r.started
 }
 
-func (r *serviceRunner) nextInterval() time.Duration {
-	cfg, err := agent.LoadConfig(r.configPath)
-	if err != nil || cfg.NetmapVersion == 0 {
-		return 5 * time.Second
-	}
-	return 5 * time.Second
-}
-
 func (r *serviceRunner) peerStats() []agent.PeerStat {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -579,14 +547,6 @@ func (r *serviceRunner) peerStats() []agent.PeerStat {
 		return nil
 	}
 	return agent.ParseUAPIStats(output)
-}
-
-func windowsAppliedPaths(items []agent.PathAssignment) []agent.AppliedPath {
-	result := make([]agent.AppliedPath, 0, len(items))
-	for _, item := range items {
-		result = append(result, agent.AppliedPath{ClientDeviceID: item.ClientDeviceID, Generation: item.Generation})
-	}
-	return result
 }
 
 func renderUAPI(cfg agent.Config, netmap agent.Netmap) (string, error) {
@@ -896,13 +856,6 @@ func udpPortInUse(port int) bool {
 	}
 	_ = conn.Close()
 	return false
-}
-
-func defaultString(value, fallback string) string {
-	if strings.TrimSpace(value) == "" {
-		return fallback
-	}
-	return value
 }
 
 func defaultPort(port int) int {

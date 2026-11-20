@@ -38,7 +38,6 @@ func main() {
 			InterfaceName:         *interfaceName,
 			SyncIntervalSeconds:   int(bootstrapagent.DefaultSyncInterval.Seconds()),
 			ReportIntervalSeconds: int(bootstrapagent.DefaultReportInterval.Seconds()),
-			RemoveStalePeers:      false,
 		})
 		if err != nil {
 			fatal(err)

@@ -1,6 +1,6 @@
 # SD-WAN 部署手册
 
-本文档适用于当前 `v1.2.0`，统一说明服务器端三个服务和 Linux、Windows 客户端的部署方式。
+本文档适用于当前 `v1.2.1`，统一说明服务器端三个服务和 Linux、Windows 客户端的部署方式。
 
 ## 1. 部署组成
 
@@ -84,14 +84,14 @@ sudo systemctl enable --now docker
 
 ### 3.2 获取代码
 
-当前发布版本是 `v1.2.0`，包含 Resend 配置修复、Windows 安装包以及按客户端自动 Relay fallback：
+当前发布版本是 `v1.2.1`，包含 Resend 配置修复、Windows 安装包以及按客户端自动 Relay fallback：
 
 ```bash
 sudo mkdir -p /opt/sdwan
 sudo chown "$USER":"$USER" /opt/sdwan
 git clone https://github.com/fansboyu/sdwan.git /opt/sdwan
 cd /opt/sdwan
-git checkout v1.2.0
+git checkout v1.2.1
 ```
 
 升级现有部署前应先升级全部 Linux/Windows 客户端到 `v1.2.0`，再启用自动中继模式。
@@ -173,18 +173,18 @@ curl -fsS https://controller.englishlisten.cn/api/v1/server/version
 
 ```bash
 cd /opt/sdwan
-sudo mkdir -p downloads/v1.2.0
+sudo mkdir -p downloads/v1.2.1
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -o downloads/v1.2.0/sdwan-agent-linux-amd64 ./cmd/agent
+  -o downloads/v1.2.1/sdwan-agent-linux-amd64 ./cmd/agent
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -o downloads/v1.2.0/sdwan-bootstrap-agent-linux-amd64 ./cmd/bootstrap-agent
+  -o downloads/v1.2.1/sdwan-bootstrap-agent-linux-amd64 ./cmd/bootstrap-agent
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -o downloads/v1.2.0/sdwan-relay-agent-linux-amd64 ./cmd/relay-agent
+  -o downloads/v1.2.1/sdwan-relay-agent-linux-amd64 ./cmd/relay-agent
 
-chmod 755 downloads/v1.2.0/*
+chmod 755 downloads/v1.2.1/*
 cp deploy/install/install.sh downloads/install.sh
 chmod 755 downloads/install.sh
 ```
@@ -195,7 +195,7 @@ chmod 755 downloads/install.sh
 
 ```bash
 curl -I https://controller.englishlisten.cn/install.sh
-curl -I https://controller.englishlisten.cn/downloads/v1.2.0/sdwan-agent-linux-amd64
+curl -I https://controller.englishlisten.cn/downloads/v1.2.1/sdwan-agent-linux-amd64
 ```
 
 ## 4. 发现服务部署
@@ -269,7 +269,7 @@ sudo ufw allow 51872/udp
 
 ```bash
 sudo install -m 0755 \
-  /opt/sdwan/downloads/v1.2.0/sdwan-bootstrap-agent-linux-amd64 \
+  /opt/sdwan/downloads/v1.2.1/sdwan-bootstrap-agent-linux-amd64 \
   /usr/local/bin/sdwan-bootstrap-agent
 
 sudo install -d -m 700 /etc/sdwan
@@ -285,7 +285,6 @@ sudo tee /etc/sdwan/bootstrap-agent.json >/dev/null <<'EOF'
   "interface_name": "sdwan-bootstrap",
   "sync_interval_seconds": 5,
   "report_interval_seconds": 2,
-  "remove_stale_peers": false
 }
 EOF
 sudo chmod 600 /etc/sdwan/bootstrap-agent.json
@@ -391,68 +390,47 @@ sudo sysctl --system
 
 ### 5.3 安装 Relay Agent
 
-可以从 Controller 下载：
+仓库提供安装脚本和 systemd unit。部署发布包时，把这两个文件与 Relay 二进制一并放入版本下载目录：
 
 ```bash
-sudo curl -fsSL \
-  https://controller.englishlisten.cn/downloads/v1.2.0/sdwan-relay-agent-linux-amd64 \
-  -o /usr/local/bin/sdwan-relay-agent
-sudo chmod 755 /usr/local/bin/sdwan-relay-agent
-sudo install -d -m 700 /etc/sdwan
+install -D -m 0644 deploy/install/install-relay.sh \
+  /opt/sdwan/downloads/v1.2.1/install-relay.sh
+install -D -m 0644 deploy/systemd/sdwan-relay-agent.service \
+  /opt/sdwan/downloads/v1.2.1/sdwan-relay-agent.service
 ```
 
-创建 `/etc/sdwan/relay-agent.json`：
+在管理台创建 Relay 后，在 Relay 主机运行：
 
 ```bash
-sudo tee /etc/sdwan/relay-agent.json >/dev/null <<'EOF'
-{
-  "controller_url": "https://controller.englishlisten.cn",
-  "relay_token": "替换为管理台返回的Relay_Token",
-  "interface_name": "sdwan-relay",
-  "sync_interval_seconds": 5,
-  "remove_stale_peers": false
-}
-EOF
-sudo chmod 600 /etc/sdwan/relay-agent.json
+curl -fsSL https://controller.englishlisten.cn/downloads/v1.2.1/install-relay.sh | sudo sh
 ```
 
-### 5.4 创建 Relay systemd 服务
+脚本会隐藏式提示输入一次性 Relay Token，安装 Linux amd64 Agent，创建权限为 `0600` 的配置文件，并启用 systemd 服务。也可从仓库目录直接执行 `sudo sh deploy/install/install-relay.sh`。
 
-当前仓库尚未内置 Relay systemd unit，需要手工创建：
+脚本只安装 Agent，不会生成或覆盖 WireGuard 私钥、接口配置、防火墙或系统路由。运行前必须已经准备好 `/etc/wireguard/sdwan-relay.conf`，并且 WireGuard 接口可正常启动；脚本会启用 `wg-quick@sdwan-relay`。IPv4 forwarding 和 FORWARD 规则仍需按主机现有防火墙策略配置。
+
+排查命令：
 
 ```bash
-sudo tee /etc/systemd/system/sdwan-relay-agent.service >/dev/null <<'EOF'
-[Unit]
-Description=SD-WAN Relay Agent
-After=network-online.target wg-quick@sdwan-relay.service
-Wants=network-online.target
-Requires=wg-quick@sdwan-relay.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/sdwan-relay-agent --config /etc/sdwan/relay-agent.json
-Restart=always
-RestartSec=3
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now sdwan-relay-agent
+sudo systemctl status wg-quick@sdwan-relay --no-pager
+sudo systemctl status sdwan-relay-agent --no-pager
+sudo journalctl -u sdwan-relay-agent -n 100 --no-pager
 ```
+
+### 5.4 验证 Relay 服务端网络
+
+确认系统转发、接口路由、UDP 端口和 peer 间 FORWARD 规则。Relay Agent 心跳正常仅代表控制面同步成功，不等于业务包已经能通过 Relay 转发。
 
 ### 5.5 启用 Relay 模式
 
-部署完成并确认 Relay 心跳正常后：
+部署完成并确认 Relay 控制面和数据面状态正常后：
 
 1. 在管理台启用该 Relay。
 2. 开启账户 Relay 模式。
 3. 客户端下一次 poll 会收到新的 netmap。
 4. 客户端 peer 将切换为 Relay。
 
-`v1.2.0` 支持直连、自动中继和强制中继。自动模式要求 Relay 最近 15 秒有心跳，并要求所有活动客户端至少为 `v1.2.0`。
+当前代码要求 Relay 心跳/接口/peer 同步正常，并观察到最近 120 秒内真实 WireGuard peer 握手，才允许启用自动或强制中继；所有活动客户端还必须满足 Controller 下发的最低版本要求。真实握手仍不等于端到端业务可达，应继续验证客户端到 Hub/目标 LAN 的路径。
 
 ### 5.6 验证 Relay
 
@@ -468,7 +446,7 @@ sudo iptables -C FORWARD -i sdwan-relay -o sdwan-relay -j ACCEPT
 
 预期：
 
-- 管理台 Relay 的 `last_seen_at` 持续更新。
+- 管理台 Relay 显示“数据面正常”，`last_seen_at`、同步时间和最近握手持续更新。
 - `sdwan-relay` 上存在账户内设备 peer。
 - 客户端 netmap 只有活动 Relay 作为主要 peer。
 - 客户端之间的 overlay 流量经过 Relay 转发。
@@ -490,7 +468,7 @@ curl -fsSL https://controller.englishlisten.cn/install.sh | sudo sh
 脚本会：
 
 - 安装 `curl`、CA 证书和 `wireguard-tools`。
-- 下载 `v1.2.0` Linux Agent。
+- 下载 `v1.2.1` Linux Agent。
 - 安装到 `/usr/local/bin/sdwan-agent`。
 - 创建 `/etc/sdwan` 和 `/etc/wireguard`。
 - 安装 `sdwan-agent.service`。
@@ -551,7 +529,7 @@ sudo sdwan-agent subnet-gateway enable \
 推荐优先使用单文件安装包：
 
 ```text
-SD-WAN-Setup-v1.2.0-x64.exe
+SD-WAN-Setup-v1.2.1-x64.exe
 ```
 
 安装包自动请求管理员权限，将三个运行文件安装到 `C:\Program Files\SD-WAN`，并安装 `SDWANService`。安装后仍然采用复制 Admin Token、点击 `Join from Clipboard` 的入网方式。
@@ -565,7 +543,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy\windows\build-installer.ps1
 输出位置：
 
 ```text
-dist\windows\SD-WAN-Setup-v1.2.0-x64.exe
+dist\windows\SD-WAN-Setup-v1.2.1-x64.exe
 ```
 
 ### 7.1 发布文件
@@ -713,16 +691,17 @@ sudo docker compose exec -T postgres \
   > "backups/sdwan.$(date +%Y%m%d-%H%M%S).sql"
 ```
 
-升级代码：
+本次 Relay 健康字段需要 Relay Agent 上报才能生效。建议先升级 Relay Agent；旧 Controller 会忽略新增 JSON 字段。确认 Relay 继续同步后再升级 Controller/Web：
 
 ```bash
 cd /opt/sdwan
 git fetch --tags
 git checkout <新版本tag>
+sudo systemctl restart sdwan-relay-agent
 sudo docker compose up -d --build controller web
 ```
 
-Controller 启动时自动执行新的 migration。
+Controller 启动时自动执行新的 migration。检查 `/readyz`、迁移版本、Relay `sync_ok`、最近握手时间和账号 Netmap。新 Relay Agent 上报真实握手前，管理台会显示“等待真实握手”，不会允许启用自动/强制 Relay。先用直连模式观察健康，再启用自动模式。
 
 ### 10.2 Linux Agent 升级
 
@@ -761,7 +740,8 @@ cd C:\sdwan
 - 数据库 migration 发生结构变化时，不要仅回滚镜像而忽略数据库兼容性。
 - Controller 回滚后检查 `/api/v1/server/version`。
 - 客户端回滚时保留 Device Token、私钥和虚拟 IP 配置。
-- 自动模式会按客户端独立切换；Relay 故障排查时可在管理台切到“直连”模式恢复普通 netmap。
+- 自动模式会按客户端独立切换；Relay 故障时自动回退直连。强制 Relay 模式 fail-closed，不会静默泄漏到直连；需要恢复服务时，管理员必须明确切换为“直连”或修复 Relay。
+- Migration 采用向前兼容的增量变更。生产环境优先回滚应用版本并保留扩展后的 schema，不要未经恢复演练直接执行 migration down。
 
 ## 12. 安全要求
 

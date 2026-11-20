@@ -1,6 +1,6 @@
 # SD-WAN 架构文档索引
 
-本文档集基于 `v1.2.0` 当前代码整理，按服务器端和客户端拆分。
+本文档集基于 `v1.2.1` 当前代码整理，按服务器端和客户端拆分。
 
 服务器和客户端的完整安装步骤见 [部署手册](../deployment.md)。
 
@@ -16,6 +16,12 @@
 
 1. [Linux 客户端](client-linux.md)
 2. [Windows 客户端](client-windows.md)
+
+跨模块分析：
+
+1. [当前数据逻辑走向](data-flow.md)：注册、入网、发现、Netmap、直连/Relay、子网流量、平台差异及数据一致性。
+2. [与 Tailcat 的对比及改造路线](tailcat-comparison-upgrade-plan.md)
+3. [多 Hub 与安全升级路线](multi-hub-upgrade.md)
 
 ## 总体关系
 

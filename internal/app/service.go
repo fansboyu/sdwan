@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -234,18 +235,20 @@ func (s *Service) createAdminSession(ctx context.Context, user sqlc.User) (AuthR
 }
 
 type AccountSummary struct {
-	User         sqlc.User           `json:"user"`
-	DeviceCount  int32               `json:"device_count"`
-	MainSite     *sqlc.Device        `json:"main_site,omitempty"`
-	Plans        []sqlc.Plan         `json:"plans"`
-	SubnetRoutes []sqlc.SubnetRoute  `json:"subnet_routes"`
-	Relays       []sqlc.Relay        `json:"relays"`
-	ActiveRelay  *sqlc.Relay         `json:"active_relay,omitempty"`
-	Subscription *sqlc.Subscription  `json:"subscription,omitempty"`
-	FreeUpgrade  FreeUpgradeSummary  `json:"free_upgrade"`
-	Capabilities AccountCapabilities `json:"capabilities"`
-	PeerPaths    []sqlc.PeerPath     `json:"peer_paths"`
-	RelayHealthy bool                `json:"relay_healthy"`
+	User           sqlc.User                  `json:"user"`
+	DeviceCount    int32                      `json:"device_count"`
+	MainSite       *sqlc.Device               `json:"main_site,omitempty"`
+	Plans          []sqlc.Plan                `json:"plans"`
+	SubnetRoutes   []sqlc.SubnetRoute         `json:"subnet_routes"`
+	RouteConflicts []sqlc.SubnetRouteConflict `json:"route_conflicts"`
+	Relays         []sqlc.Relay               `json:"relays"`
+	ActiveRelay    *sqlc.Relay                `json:"active_relay,omitempty"`
+	Subscription   *sqlc.Subscription         `json:"subscription,omitempty"`
+	FreeUpgrade    FreeUpgradeSummary         `json:"free_upgrade"`
+	Capabilities   AccountCapabilities        `json:"capabilities"`
+	PeerPaths      []sqlc.PeerPath            `json:"peer_paths"`
+	PathQuality    []sqlc.DevicePathQuality   `json:"path_quality"`
+	RelayHealthy   bool                       `json:"relay_healthy"`
 }
 
 type FreeUpgradeSummary struct {
@@ -276,11 +279,26 @@ func (s *Service) AccountSummary(ctx context.Context, user sqlc.User) (AccountSu
 	if err != nil {
 		return AccountSummary{}, err
 	}
+	serviceStatus, err := s.store.Queries.ListSubnetGatewayServiceStatusByUser(ctx, user.ID)
+	if err != nil {
+		return AccountSummary{}, err
+	}
+	for i := range subnets {
+		subnets[i].GatewayServiceStatus = serviceStatus[subnets[i].Cidr]
+	}
+	conflicts, err := s.store.Queries.ListSubnetRouteConflictsByUser(ctx, user.ID)
+	if err != nil {
+		return AccountSummary{}, err
+	}
 	relays, err := s.store.Queries.ListRelaysByUser(ctx, user.ID)
 	if err != nil {
 		return AccountSummary{}, err
 	}
 	paths, err := s.store.Queries.ListPeerPathsByUser(ctx, user.ID)
+	if err != nil {
+		return AccountSummary{}, err
+	}
+	pathQuality, err := s.store.Queries.ListPathQualityByUser(ctx, user.ID)
 	if err != nil {
 		return AccountSummary{}, err
 	}
@@ -299,19 +317,27 @@ func (s *Service) AccountSummary(ctx context.Context, user sqlc.User) (AccountSu
 	user.PasswordHash = ""
 	active := activeRelay(relays)
 	healthy := active != nil && relayIsHealthy(*active)
+	for i := range relays {
+		relays[i].HealthStatus = relayHealthStatus(relays[i])
+	}
+	if active != nil {
+		active.HealthStatus = relayHealthStatus(*active)
+	}
 	return AccountSummary{
-		User:         user,
-		DeviceCount:  count,
-		MainSite:     mainSite,
-		Plans:        plans,
-		SubnetRoutes: subnets,
-		Relays:       relays,
-		ActiveRelay:  active,
-		Subscription: subscription,
-		FreeUpgrade:  freeUpgradeSummary(freeUsed),
-		Capabilities: capabilitiesForPlan(user.PlanCode),
-		PeerPaths:    paths,
-		RelayHealthy: healthy,
+		User:           user,
+		DeviceCount:    count,
+		MainSite:       mainSite,
+		Plans:          plans,
+		SubnetRoutes:   subnets,
+		RouteConflicts: conflicts,
+		Relays:         relays,
+		ActiveRelay:    active,
+		Subscription:   subscription,
+		FreeUpgrade:    freeUpgradeSummary(freeUsed),
+		Capabilities:   capabilitiesForPlan(user.PlanCode),
+		PeerPaths:      paths,
+		PathQuality:    pathQuality,
+		RelayHealthy:   healthy,
 	}, nil
 }
 
@@ -756,18 +782,27 @@ type PollRequest struct {
 	AdvertiseRoutes      []string              `json:"advertise_routes,omitempty"`
 	SubnetGateways       []SubnetGatewayReport `json:"subnet_gateways,omitempty"`
 	PeerStats            []PeerStatReport      `json:"peer_stats,omitempty"`
+	PathQuality          []PathQualityReport   `json:"path_quality,omitempty"`
 	AppliedPaths         []AppliedPathReport   `json:"applied_paths,omitempty"`
 }
 
 type SubnetGatewayReport struct {
-	LANCIDR                  string `json:"lan_cidr"`
-	Enabled                  bool   `json:"enabled"`
-	OutInterface             string `json:"out_interface"`
-	RouteInterface           string `json:"route_interface,omitempty"`
-	LANTarget                string `json:"lan_target,omitempty"`
-	LANTargetReachable       bool   `json:"lan_target_reachable"`
-	RouteMatchesOutInterface bool   `json:"route_matches_out_interface"`
-	Error                    string `json:"error,omitempty"`
+	LANCIDR                  string                     `json:"lan_cidr"`
+	Enabled                  bool                       `json:"enabled"`
+	OutInterface             string                     `json:"out_interface"`
+	RouteInterface           string                     `json:"route_interface,omitempty"`
+	LANTarget                string                     `json:"lan_target,omitempty"`
+	LANTargetReachable       bool                       `json:"lan_target_reachable"`
+	RouteMatchesOutInterface bool                       `json:"route_matches_out_interface"`
+	ServiceProbes            []SubnetServiceProbeReport `json:"service_probes,omitempty"`
+	Error                    string                     `json:"error,omitempty"`
+}
+
+type SubnetServiceProbeReport struct {
+	Target    string `json:"target"`
+	Reachable bool   `json:"reachable"`
+	LatencyMs int64  `json:"latency_ms,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type PollResponse struct {
@@ -795,6 +830,9 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 		return PollResponse{}, err
 	}
 	if err := s.recordPathReports(ctx, device, req.PeerStats, req.AppliedPaths); err != nil {
+		return PollResponse{}, err
+	}
+	if err := s.recordPathQualityReports(ctx, device, req.PathQuality); err != nil {
 		return PollResponse{}, err
 	}
 	endpointChanged := false
@@ -905,8 +943,16 @@ func (s *Service) syncAdvertisedSubnetRoutes(ctx context.Context, device sqlc.De
 			return false, err
 		}
 		if err := validateAdvertisedSubnetRoutes(device.ID, normalized, existing); err != nil {
+			for _, conflict := range findSubnetRouteConflicts(device.ID, normalized, existing) {
+				if recordErr := s.store.Queries.RecordSubnetRouteConflict(ctx, "src_"+ksuid.New().String(), device.UserID, device.ID, conflict.CIDR, conflict.Details); recordErr != nil {
+					return false, recordErr
+				}
+			}
 			return false, err
 		}
+	}
+	if err := s.store.Queries.ResolveSubnetRouteConflicts(ctx, device.ID); err != nil {
+		return false, err
 	}
 	changed := false
 	for _, cidr := range normalized {
@@ -928,6 +974,28 @@ func (s *Service) syncAdvertisedSubnetRoutes(ctx context.Context, device sqlc.De
 	return changed || deleted > 0, nil
 }
 
+type subnetRouteConflict struct {
+	CIDR    string
+	Details string
+}
+
+func findSubnetRouteConflicts(deviceID string, cidrs []string, existing []sqlc.SubnetRoute) []subnetRouteConflict {
+	var conflicts []subnetRouteConflict
+	for i, cidr := range cidrs {
+		for j := i + 1; j < len(cidrs); j++ {
+			if subnetCIDRsOverlap(cidr, cidrs[j]) {
+				conflicts = append(conflicts, subnetRouteConflict{CIDR: cidr, Details: fmt.Sprintf("%s overlaps another advertised route %s", cidr, cidrs[j])})
+			}
+		}
+		for _, route := range existing {
+			if route.Advertised && route.DeviceID != deviceID && subnetCIDRsOverlap(cidr, route.Cidr) {
+				conflicts = append(conflicts, subnetRouteConflict{CIDR: cidr, Details: fmt.Sprintf("%s overlaps existing route %s advertised by device %s", cidr, route.Cidr, route.DeviceID)})
+			}
+		}
+	}
+	return conflicts
+}
+
 func (s *Service) recordSubnetGatewayReports(ctx context.Context, device sqlc.Device, reports []SubnetGatewayReport) (bool, error) {
 	changed := false
 	for _, report := range reports {
@@ -942,6 +1010,10 @@ func (s *Service) recordSubnetGatewayReports(ctx context.Context, device sqlc.De
 		if errorText == "" && !report.RouteMatchesOutInterface {
 			errorText = "route uses a different LAN interface"
 		}
+		probesJSON, err := json.Marshal(report.ServiceProbes)
+		if err != nil {
+			return false, err
+		}
 		updated, err := s.store.Queries.UpdateSubnetGatewayStatus(ctx, sqlc.UpdateSubnetGatewayStatusParams{
 			UserID:                device.UserID,
 			DeviceID:              device.ID,
@@ -952,6 +1024,7 @@ func (s *Service) recordSubnetGatewayReports(ctx context.Context, device sqlc.De
 			GatewayRouteInterface: strings.TrimSpace(report.RouteInterface),
 			GatewayLANTarget:      strings.TrimSpace(report.LANTarget),
 			GatewayLANReachable:   report.LANTargetReachable,
+			GatewayServiceStatus:  string(probesJSON),
 		})
 		if err != nil {
 			return false, err
@@ -969,8 +1042,19 @@ type Netmap struct {
 	BootstrapPeer   *NetmapPeer      `json:"bootstrap_peer,omitempty"`
 	Relays          []interface{}    `json:"relays"`
 	PathMode        string           `json:"path_mode"`
+	RelayPolicy     string           `json:"relay_policy"`
+	RelayCandidates []RelayCandidate `json:"relay_candidates,omitempty"`
 	PathGeneration  int64            `json:"path_generation"`
 	PathAssignments []PathAssignment `json:"path_assignments,omitempty"`
+}
+
+type RelayCandidate struct {
+	RelayID   string `json:"relay_id"`
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+	VirtualIP string `json:"virtual_ip"`
+	Endpoint  string `json:"endpoint"`
+	Healthy   bool   `json:"healthy"`
 }
 
 type NetmapSelf struct {
@@ -999,6 +1083,10 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 		return Netmap{}, err
 	}
 	user, err := s.store.Queries.GetUser(ctx, self.UserID)
+	if err != nil {
+		return Netmap{}, err
+	}
+	user, _, _, err = s.refreshSubscriptionState(ctx, user)
 	if err != nil {
 		return Netmap{}, err
 	}
@@ -1058,6 +1146,11 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 				}},
 				BootstrapPeer: s.bootstrapPeer(),
 				Relays:        []interface{}{relay},
+				PathMode:      pathModeRelay,
+				RelayPolicy:   pathModeRelay,
+				RelayCandidates: []RelayCandidate{
+					relayCandidate(relay),
+				},
 			}, nil
 		}
 	}
@@ -1093,6 +1186,8 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 		Peers:         peers,
 		BootstrapPeer: s.bootstrapPeer(),
 		Relays:        []interface{}{},
+		PathMode:      pathModeDirect,
+		RelayPolicy:   pathModeDirect,
 	}, nil
 }
 
@@ -1188,6 +1283,16 @@ type RelayPeer struct {
 	AllowedIPs []string `json:"allowed_ips"`
 }
 
+type RelayHeartbeatRequest struct {
+	InterfaceUp        bool       `json:"interface_up"`
+	SyncedPeerCount    int32      `json:"synced_peer_count"`
+	HandshakePeerCount int32      `json:"handshake_peer_count"`
+	LastHandshakeAt    *time.Time `json:"last_handshake_at,omitempty"`
+	Version            string     `json:"version"`
+	LastError          string     `json:"last_error"`
+	SyncOK             bool       `json:"sync_ok"`
+}
+
 type RelayPeersResponse struct {
 	Relay sqlc.Relay  `json:"relay"`
 	Peers []RelayPeer `json:"peers"`
@@ -1234,12 +1339,21 @@ func (s *Service) RelayPeers(ctx context.Context, bearer string) (RelayPeersResp
 	return RelayPeersResponse{Relay: relay, Peers: peers}, nil
 }
 
-func (s *Service) RelayHeartbeat(ctx context.Context, bearer string) error {
+func (s *Service) RelayHeartbeat(ctx context.Context, bearer string, req RelayHeartbeatRequest) error {
 	relay, err := s.relayFromToken(ctx, bearer)
 	if err != nil {
 		return err
 	}
-	return s.store.Queries.UpdateRelayHeartbeat(ctx, relay.ID)
+	return s.store.Queries.UpdateRelayHeartbeat(ctx, sqlc.RelayHeartbeatParams{
+		ID:                 relay.ID,
+		InterfaceUp:        req.InterfaceUp,
+		SyncedPeerCount:    req.SyncedPeerCount,
+		HandshakePeerCount: req.HandshakePeerCount,
+		LastHandshakeAt:    req.LastHandshakeAt,
+		Version:            strings.TrimSpace(req.Version),
+		LastError:          strings.TrimSpace(req.LastError),
+		SyncOK:             req.SyncOK,
+	})
 }
 
 func (s *Service) BootstrapPeers(ctx context.Context, bearer string) (BootstrapPeersResponse, error) {
@@ -1333,6 +1447,10 @@ func (s *Service) ServerVersion() map[string]any {
 		"min_supported_client_version": s.cfg.MinSupportedClientVersion,
 		"latest_client_version":        s.cfg.LatestClientVersion,
 	}
+}
+
+func (s *Service) Ready(ctx context.Context) error {
+	return s.store.Ping(ctx)
 }
 
 func (s *Service) deviceFromToken(ctx context.Context, bearer string) (sqlc.Device, error) {
@@ -1567,14 +1685,18 @@ func planRank(code string) int {
 }
 
 func (s *Service) refreshSubscriptionState(ctx context.Context, user sqlc.User) (sqlc.User, *sqlc.Subscription, int32, error) {
-	expired, err := s.store.Queries.ExpireActiveSubscriptionsByUser(ctx, user.ID)
+	err := s.store.WithTx(ctx, func(q *sqlc.Queries) error {
+		expired, err := q.ExpireActiveSubscriptionsByUser(ctx, user.ID)
+		if err != nil || expired == 0 {
+			return err
+		}
+		if err := q.UpdateUserPlan(ctx, user.ID, "free"); err != nil {
+			return err
+		}
+		return q.BumpNetmapVersion(ctx, user.ID)
+	})
 	if err != nil {
 		return sqlc.User{}, nil, 0, err
-	}
-	if expired > 0 {
-		if err := s.store.Queries.UpdateUserPlan(ctx, user.ID, "free"); err != nil {
-			return sqlc.User{}, nil, 0, err
-		}
 	}
 
 	updatedUser, err := s.store.Queries.GetUser(ctx, user.ID)

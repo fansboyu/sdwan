@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
+import { appliedGeneration, overlayStatus } from './path-status.js'
 import { ArrowLeftRight, Cable, GitFork, LayoutDashboard, Monitor, Moon, Network, Radio, RefreshCw, Settings, Sun } from '@lucide/vue'
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || ''
@@ -778,7 +779,7 @@ onMounted(async () => {
               <div class="data-table">
                 <div class="data-row path-table-head"><span>客户端 / 主站点</span><span>控制器策略</span><span>实际路径 / 验证</span><span>路径质量</span><span>最后握手</span><span>流量</span></div>
                 <template v-for="path in account.peer_paths || []" :key="path.client_device_id">
-                  <div class="data-row path-table-row"><span><strong>{{ deviceLabel(path.client_device_id) }}</strong><small>{{ deviceLabel(path.main_site_device_id) }}</small></span><span>{{ path.current_path }} → {{ path.desired_path }}<small>generation {{ path.generation }} · {{ path.state }}</small></span><span><strong>{{ path.verified_path || '未确认' }}</strong><small :class="path.verification_state === 'verified' ? 'text-good' : path.verification_state === 'failed' || path.verification_state === 'path_mismatch' ? 'text-warn' : ''">{{ pathVerificationLabel(path) }}</small><small v-if="path.verification_error">{{ path.verification_error }}</small></span><span>{{ peerPathQuality(path).map((quality) => `${quality.path_type}${quality.current_path ? ' 当前' : ' 候选'}`).join(' / ') || '等待 Agent 上报' }}</span><span>{{ formatTime(peerPathQuality(path)[0]?.latest_handshake_at) }}</span><span>{{ peerPathQuality(path)[0]?.rx_bytes || 0 }} B 收 / {{ peerPathQuality(path)[0]?.tx_bytes || 0 }} B 发</span></div>
+                  <div class="data-row path-table-row"><span><strong>{{ deviceLabel(path.client_device_id) }}</strong><small>{{ deviceLabel(path.main_site_device_id) }}</small></span><span>{{ path.current_path }} → {{ path.desired_path }}<small>目标代次 {{ path.generation }}</small><small>分支：{{ appliedGeneration(path.client_applied_generation, path.generation) }}</small><small>Hub：{{ appliedGeneration(path.hub_applied_generation, path.generation) }}</small></span><span><strong>{{ path.verified_path || '未确认' }}</strong><small :class="overlayStatus(path) === 'Overlay 已验证' ? 'text-good' : path.verification_state === 'failed' || path.verification_state === 'path_mismatch' ? 'text-warn' : ''">{{ overlayStatus(path) }}</small><small v-if="path.verified_at">最近验证 {{ formatTime(path.verified_at) }}</small><small>分支到 LAN：未采集</small><small v-if="path.verification_error">{{ path.verification_error }}</small></span><span>{{ peerPathQuality(path).map((quality) => `${quality.path_type}${quality.current_path ? ' 当前' : ' 候选'}`).join(' / ') || '等待 Agent 上报' }}</span><span>{{ formatTime(peerPathQuality(path)[0]?.latest_handshake_at) }}</span><span>{{ peerPathQuality(path)[0]?.rx_bytes || 0 }} B 收 / {{ peerPathQuality(path)[0]?.tx_bytes || 0 }} B 发</span></div>
                 </template>
                 <div class="table-empty" v-if="!(account.peer_paths || []).length">当前没有需要展示的路径状态。</div>
               </div>

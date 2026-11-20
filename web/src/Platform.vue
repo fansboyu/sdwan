@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { appliedGeneration, overlayStatus } from './path-status.js'
 import { Activity, ArrowLeft, ArrowRight, Building2, Database, LayoutDashboard, LogOut, Moon, Network, RefreshCw, Search, ShieldCheck, Sun } from '@lucide/vue'
 
 const token = ref(sessionStorage.getItem('platform_session') || '')
@@ -19,7 +20,6 @@ const visible = computed(() => tenants.value.filter(t => [t.email, t.cidr, t.pla
 const totals = computed(() => tenants.value.reduce((sum, t) => ({ devices: sum.devices + t.devices, online: sum.online + t.online }), { devices: 0, online: 0 }))
 const fmt = value => value ? new Date(value).toLocaleString() : '—'
 const device = id => detail.value?.devices?.find(d => d.id === id)?.hostname || id
-const state = status => ({ verified: '已验证', verifying: '验证中', failed: '验证失败', path_mismatch: '两端路径不一致' })[status] || '未验证'
 
 function toggleTheme() {
   theme.value = theme.value === 'light' ? 'dark' : 'light'
@@ -122,7 +122,7 @@ onMounted(() => { if (token.value) run(load) })
         </template>
         <section v-if="view === 'health'" class="content-section platform-table-wrap">
           <table class="platform-table"><thead><tr><th>组件</th><th>状态</th></tr></thead><tbody>
-            <tr><td><Activity :size="17" /> Controller</td><td>{{ health ? '可响应' : '未确认' }}</td></tr>
+            <tr><td><Activity :size="17" /> Controller</td><td>{{ health ? (health.postgres ? '就绪' : '未就绪 · API 可响应') : '未确认' }}<small v-if="health">{{ fmt(health.checked_at) }}</small></td></tr>
             <tr><td><Database :size="17" /> PostgreSQL</td><td>{{ health ? (health.postgres ? '可连接' : '连接异常') : '未确认' }}</td></tr>
             <tr><td><Network :size="17" /> Bootstrap</td><td>未采集</td></tr>
           </tbody></table>
@@ -142,9 +142,9 @@ onMounted(() => { if (token.value) run(load) })
             </tbody></table>
           </section>
           <section class="content-section platform-table-wrap">
-            <h2>连接路径</h2><table class="platform-table"><thead><tr><th>分支 / Hub</th><th>目标路径</th><th>Overlay 验证</th><th>上次验证时间</th></tr></thead><tbody>
-              <tr v-for="p in detail.paths" :key="p.client_device_id"><td>{{ device(p.client_device_id) }} / {{ device(p.main_site_device_id) }}</td><td>{{ p.desired_path }}</td><td>{{ state(p.verification_state) }}<small v-if="p.verification_error">{{ p.verification_error }}</small></td><td>{{ fmt(p.verified_at) }}</td></tr>
-              <tr v-if="!detail.paths?.length"><td colspan="4">暂无链路</td></tr>
+            <h2>连接路径</h2><table class="platform-table"><thead><tr><th>分支 / Hub</th><th>目标路径</th><th>双端已应用</th><th>Overlay 验证</th><th>上次验证时间</th></tr></thead><tbody>
+              <tr v-for="p in detail.paths" :key="p.client_device_id"><td>{{ device(p.client_device_id) }} / {{ device(p.main_site_device_id) }}</td><td>{{ p.desired_path }}<small>目标代次 {{ p.generation }}</small></td><td>分支：{{ appliedGeneration(p.client_applied_generation, p.generation) }}<small>Hub：{{ appliedGeneration(p.hub_applied_generation, p.generation) }}</small></td><td>{{ overlayStatus(p) }}<small v-if="p.verification_error">{{ p.verification_error }}</small></td><td>{{ fmt(p.verified_at) }}</td></tr>
+              <tr v-if="!detail.paths?.length"><td colspan="5">暂无链路</td></tr>
             </tbody></table>
           </section>
           <section class="content-section platform-table-wrap">

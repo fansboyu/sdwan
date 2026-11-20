@@ -135,20 +135,22 @@ type Relay struct {
 }
 
 type PeerPath struct {
-	UserID             string     `json:"user_id"`
-	ClientDeviceID     string     `json:"client_device_id"`
-	MainSiteDeviceID   string     `json:"main_site_device_id"`
-	CurrentPath        string     `json:"current_path"`
-	DesiredPath        string     `json:"desired_path"`
-	State              string     `json:"state"`
-	Generation         int64      `json:"generation"`
-	VerifiedPath       string     `json:"verified_path"`
-	VerifiedGeneration int64      `json:"verified_generation"`
-	VerificationState  string     `json:"verification_state"`
-	VerificationError  string     `json:"verification_error"`
-	VerifiedAt         *time.Time `json:"verified_at,omitempty"`
-	SwitchedAt         time.Time  `json:"switched_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ClientAppliedGeneration *int64     `json:"client_applied_generation"`
+	HubAppliedGeneration    *int64     `json:"hub_applied_generation"`
+	UserID                  string     `json:"user_id"`
+	ClientDeviceID          string     `json:"client_device_id"`
+	MainSiteDeviceID        string     `json:"main_site_device_id"`
+	CurrentPath             string     `json:"current_path"`
+	DesiredPath             string     `json:"desired_path"`
+	State                   string     `json:"state"`
+	Generation              int64      `json:"generation"`
+	VerifiedPath            string     `json:"verified_path"`
+	VerifiedGeneration      int64      `json:"verified_generation"`
+	VerificationState       string     `json:"verification_state"`
+	VerificationError       string     `json:"verification_error"`
+	VerifiedAt              *time.Time `json:"verified_at,omitempty"`
+	SwitchedAt              time.Time  `json:"switched_at"`
+	UpdatedAt               time.Time  `json:"updated_at"`
 }
 
 type DevicePeerStat struct {

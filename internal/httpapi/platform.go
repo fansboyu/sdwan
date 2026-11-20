@@ -111,6 +111,7 @@ func (r *Router) platformRoutes() {
 		writeJSON(w, http.StatusOK, item)
 	}))
 	r.mux.HandleFunc("GET /api/platform/health", authorized(func(w http.ResponseWriter, req *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"controller": true, "postgres": r.svc.Ready(req.Context()) == nil})
+		dbReady := r.svc.Ready(req.Context()) == nil
+		writeJSON(w, http.StatusOK, map[string]any{"controller": true, "postgres": dbReady, "checked_at": time.Now().UTC()})
 	}))
 }

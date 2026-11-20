@@ -11,7 +11,14 @@ func (q *Queries) UpdateUserPathMode(ctx context.Context, userID, mode string) e
 }
 
 func (q *Queries) ListPeerPathsByUser(ctx context.Context, userID string) ([]PeerPath, error) {
-	rows, err := q.db.Query(ctx, `SELECT user_id, client_device_id, main_site_device_id, current_path, desired_path, state, generation, verified_path, verified_generation, verification_state, verification_error, verified_at, switched_at, updated_at FROM peer_paths WHERE user_id=$1 ORDER BY client_device_id`, userID)
+	rows, err := q.db.Query(ctx, `
+SELECT p.user_id, p.client_device_id, p.main_site_device_id, p.current_path, p.desired_path, p.state,
+       p.generation, p.verified_path, p.verified_generation, p.verification_state, p.verification_error,
+       p.verified_at, p.switched_at, p.updated_at, client.generation, hub.generation
+FROM peer_paths p
+LEFT JOIN device_path_applied client ON client.device_id=p.client_device_id AND client.client_device_id=p.client_device_id
+LEFT JOIN device_path_applied hub ON hub.device_id=p.main_site_device_id AND hub.client_device_id=p.client_device_id
+WHERE p.user_id=$1 ORDER BY p.client_device_id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +26,7 @@ func (q *Queries) ListPeerPathsByUser(ctx context.Context, userID string) ([]Pee
 	var result []PeerPath
 	for rows.Next() {
 		var item PeerPath
-		if err := rows.Scan(&item.UserID, &item.ClientDeviceID, &item.MainSiteDeviceID, &item.CurrentPath, &item.DesiredPath, &item.State, &item.Generation, &item.VerifiedPath, &item.VerifiedGeneration, &item.VerificationState, &item.VerificationError, &item.VerifiedAt, &item.SwitchedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.UserID, &item.ClientDeviceID, &item.MainSiteDeviceID, &item.CurrentPath, &item.DesiredPath, &item.State, &item.Generation, &item.VerifiedPath, &item.VerifiedGeneration, &item.VerificationState, &item.VerificationError, &item.VerifiedAt, &item.SwitchedAt, &item.UpdatedAt, &item.ClientAppliedGeneration, &item.HubAppliedGeneration); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -59,8 +66,14 @@ func (q *Queries) CompletePeerPath(ctx context.Context, userID, clientID string)
 func (q *Queries) UpdatePeerPathVerification(ctx context.Context, userID, clientID, state, verifiedPath, message string, generation int64, verified bool) error {
 	_, err := q.db.Exec(ctx, `UPDATE peer_paths SET verification_state=$3, verified_path=CASE WHEN $7 THEN $4 ELSE verified_path END,
  verified_generation=CASE WHEN $7 THEN $6 ELSE verified_generation END, verification_error=$5,
- verified_at=CASE WHEN $7 THEN now() ELSE verified_at END, verification_updated_at=now()
- WHERE user_id=$1 AND client_device_id=$2`, userID, clientID, state, verifiedPath, message, generation, verified)
+ verified_at=CASE WHEN $7 THEN (
+   SELECT min(a.verified_at) FROM device_path_applied a
+   WHERE a.client_device_id=peer_paths.client_device_id
+     AND a.device_id IN (peer_paths.client_device_id, peer_paths.main_site_device_id)
+     AND a.generation=$6 AND a.effective_path=$4 AND a.verification_status='verified'
+   HAVING count(a.verified_at)=2
+ ) ELSE verified_at END, verification_updated_at=now()
+ WHERE user_id=$1 AND client_device_id=$2 AND generation=$6`, userID, clientID, state, verifiedPath, message, generation, verified)
 	return err
 }
 

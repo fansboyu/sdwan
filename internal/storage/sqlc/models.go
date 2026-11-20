@@ -112,6 +112,9 @@ type Relay struct {
 }
 
 type PeerPath struct {
+	HubEndpoint             string     `json:"hub_endpoint,omitempty"`
+	ClientEndpoint          string     `json:"client_endpoint,omitempty"`
+	EndpointTrial           int        `json:"endpoint_trial"`
 	ClientAppliedGeneration *int64     `json:"client_applied_generation"`
 	HubAppliedGeneration    *int64     `json:"hub_applied_generation"`
 	UserID                  string     `json:"user_id"`

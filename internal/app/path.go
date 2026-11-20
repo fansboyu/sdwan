@@ -206,9 +206,10 @@ func (s *Service) reconcilePeerPaths(ctx context.Context, user sqlc.User) (bool,
 		byID[d.ID] = d
 	}
 	relay, relayErr := s.store.Queries.GetActiveRelayByUser(ctx, user.ID)
-	relayHealthy := relayErr == nil && relay.LastSeenAt != nil && time.Since(*relay.LastSeenAt) <= relayHeartbeatTTL
+	relayHealthy := relayErr == nil && relayIsHealthy(relay)
 	changed := false
 	now := time.Now()
+	var endpoints map[string][]sqlc.DeviceEndpoint
 	for _, path := range paths {
 		client, cok := byID[path.ClientDeviceID]
 		mainSite, mok := byID[path.MainSiteDeviceID]
@@ -217,6 +218,14 @@ func (s *Service) reconcilePeerPaths(ctx context.Context, user sqlc.User) (bool,
 		}
 		directHealthy := s.pairHandshakeHealthy(ctx, client.ID, mainSite.PublicKey, mainSite.ID, client.PublicKey, pathFailureWindow)
 		if path.DesiredPath != path.CurrentPath {
+			if mode == pathModeAuto && path.DesiredPath == pathModeRelay &&
+				(!relayHealthy || now.Sub(path.UpdatedAt) >= 75*time.Second) {
+				if _, err := s.store.Queries.SetPeerPathDesired(ctx, user.ID, client.ID, pathModeDirect, "direct_suspect"); err != nil {
+					return false, err
+				}
+				changed = true
+				continue
+			}
 			clientStatus, cErr := s.store.Queries.GetAppliedPathStatus(ctx, client.ID, client.ID)
 			mainStatus, mErr := s.store.Queries.GetAppliedPathStatus(ctx, mainSite.ID, client.ID)
 			state, message, verified := resolvePathVerification(path.DesiredPath, path.Generation, clientStatus, cErr, mainStatus, mErr)
@@ -236,6 +245,28 @@ func (s *Service) reconcilePeerPaths(ctx context.Context, user sqlc.User) (bool,
 		state, message, verified := resolvePathVerification(path.CurrentPath, path.Generation, clientStatus, cErr, mainStatus, mErr)
 		if err := s.store.Queries.UpdatePeerPathVerification(ctx, user.ID, client.ID, state, path.CurrentPath, message, path.Generation, verified); err != nil {
 			return false, err
+		}
+		if mode != pathModeRelay && path.CurrentPath == pathModeDirect && !verified &&
+			now.Sub(path.UpdatedAt) >= pathFailureWindow && path.EndpointTrial < maxEndpointTrials {
+			if endpoints == nil {
+				items, err := s.store.Queries.ListEndpointsByUser(ctx, user.ID)
+				if err != nil {
+					return false, err
+				}
+				endpoints = make(map[string][]sqlc.DeviceEndpoint)
+				for _, item := range items {
+					endpoints[item.DeviceID] = append(endpoints[item.DeviceID], item)
+				}
+			}
+			left, right, ok := nextDirectEndpoints(orderedEndpointAddresses(endpoints[client.ID]), orderedEndpointAddresses(endpoints[mainSite.ID]), path)
+			if ok {
+				rotated, err := s.store.Queries.TryDirectEndpoints(ctx, path, left, right)
+				if err != nil {
+					return false, err
+				}
+				changed = changed || rotated
+				continue
+			}
 		}
 		switch mode {
 		case pathModeDirect:
@@ -400,7 +431,7 @@ func (s *Service) pathAwareNetmap(ctx context.Context, user sqlc.User, self sqlc
 			if active {
 				allowed = []string{client.VirtualIP + "/32"}
 			}
-			peers = append(peers, NetmapPeer{DeviceID: client.ID, Hostname: client.Hostname, VirtualIP: client.VirtualIP, PublicKey: client.PublicKey, AllowedIPs: allowed, Endpoints: orderedEndpointAddresses(endpoints[client.ID]), PersistentKeepalive: probeKeepalive(active), PathRole: pathModeDirect, PathActive: active})
+			peers = append(peers, NetmapPeer{DeviceID: client.ID, Hostname: client.Hostname, VirtualIP: client.VirtualIP, PublicKey: client.PublicKey, AllowedIPs: allowed, Endpoints: preferEndpoint(orderedEndpointAddresses(endpoints[client.ID]), path.ClientEndpoint), PersistentKeepalive: probeKeepalive(active), PathRole: pathModeDirect, PathActive: active})
 			if !active {
 				relayAllowed = append(relayAllowed, client.VirtualIP+"/32")
 			}
@@ -429,7 +460,7 @@ func (s *Service) pathAwareNetmap(ctx context.Context, user sqlc.User, self sqlc
 		if directActive {
 			directAllowed = businessAllowed
 		}
-		peers = append(peers, NetmapPeer{DeviceID: mainSite.ID, Hostname: mainSite.Hostname, VirtualIP: mainSite.VirtualIP, PublicKey: mainSite.PublicKey, AllowedIPs: directAllowed, Endpoints: orderedEndpointAddresses(endpoints[mainSite.ID]), PersistentKeepalive: probeKeepalive(directActive), PathRole: pathModeDirect, PathActive: directActive})
+		peers = append(peers, NetmapPeer{DeviceID: mainSite.ID, Hostname: mainSite.Hostname, VirtualIP: mainSite.VirtualIP, PublicKey: mainSite.PublicKey, AllowedIPs: directAllowed, Endpoints: preferEndpoint(orderedEndpointAddresses(endpoints[mainSite.ID]), path.HubEndpoint), PersistentKeepalive: probeKeepalive(directActive), PathRole: pathModeDirect, PathActive: directActive})
 		if relay != nil {
 			relayAllowed := []string{}
 			if !directActive {

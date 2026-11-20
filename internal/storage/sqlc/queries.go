@@ -307,14 +307,19 @@ type UpsertDeviceEndpointParams struct {
 }
 
 func (q *Queries) UpsertDeviceEndpoint(ctx context.Context, arg UpsertDeviceEndpointParams) (bool, error) {
-	row := q.db.QueryRow(ctx, `WITH upserted AS (
+	row := q.db.QueryRow(ctx, `WITH previous AS (
+  SELECT address, updated_at FROM device_endpoints
+  WHERE device_id=$2 AND endpoint_type=$3 ORDER BY updated_at DESC LIMIT 1
+), upserted AS (
 INSERT INTO device_endpoints (id, device_id, endpoint_type, address, source, rtt_ms, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, now())
 ON CONFLICT (device_id, endpoint_type, address)
 DO UPDATE SET source = EXCLUDED.source, rtt_ms = EXCLUDED.rtt_ms, updated_at = now()
 RETURNING xmax = 0 AS inserted
 )
-SELECT inserted FROM upserted`,
+SELECT inserted OR ($3='bootstrap' AND EXISTS (
+ SELECT 1 FROM previous WHERE address<>$4 OR updated_at<now()-interval '2 minutes'
+)) FROM upserted`,
 		arg.ID, arg.DeviceID, arg.EndpointType, arg.Address, arg.Source, arg.RttMs)
 	var inserted bool
 	err := row.Scan(&inserted)

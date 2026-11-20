@@ -14,7 +14,8 @@ func (q *Queries) ListPeerPathsByUser(ctx context.Context, userID string) ([]Pee
 	rows, err := q.db.Query(ctx, `
 SELECT p.user_id, p.client_device_id, p.main_site_device_id, p.current_path, p.desired_path, p.state,
        p.generation, p.verified_path, p.verified_generation, p.verification_state, p.verification_error,
-       p.verified_at, p.switched_at, p.updated_at, client.generation, hub.generation
+       p.verified_at, p.switched_at, p.updated_at, client.generation, hub.generation,
+       p.hub_endpoint, p.client_endpoint, p.endpoint_trial
 FROM peer_paths p
 LEFT JOIN device_path_applied client ON client.device_id=p.client_device_id AND client.client_device_id=p.client_device_id
 LEFT JOIN device_path_applied hub ON hub.device_id=p.main_site_device_id AND hub.client_device_id=p.client_device_id
@@ -26,12 +27,22 @@ WHERE p.user_id=$1 ORDER BY p.client_device_id`, userID)
 	var result []PeerPath
 	for rows.Next() {
 		var item PeerPath
-		if err := rows.Scan(&item.UserID, &item.ClientDeviceID, &item.MainSiteDeviceID, &item.CurrentPath, &item.DesiredPath, &item.State, &item.Generation, &item.VerifiedPath, &item.VerifiedGeneration, &item.VerificationState, &item.VerificationError, &item.VerifiedAt, &item.SwitchedAt, &item.UpdatedAt, &item.ClientAppliedGeneration, &item.HubAppliedGeneration); err != nil {
+		if err := rows.Scan(&item.UserID, &item.ClientDeviceID, &item.MainSiteDeviceID, &item.CurrentPath, &item.DesiredPath, &item.State, &item.Generation, &item.VerifiedPath, &item.VerifiedGeneration, &item.VerificationState, &item.VerificationError, &item.VerifiedAt, &item.SwitchedAt, &item.UpdatedAt, &item.ClientAppliedGeneration, &item.HubAppliedGeneration, &item.HubEndpoint, &item.ClientEndpoint, &item.EndpointTrial); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+func (q *Queries) TryDirectEndpoints(ctx context.Context, path PeerPath, clientEndpoint, hubEndpoint string) (bool, error) {
+	tag, err := q.db.Exec(ctx, `UPDATE peer_paths SET client_endpoint=$4, hub_endpoint=$5,
+ generation=generation+1, endpoint_trial=endpoint_trial+1, verification_state='pending',
+ verification_error='', verified_at=NULL, updated_at=now()
+ WHERE user_id=$1 AND client_device_id=$2 AND generation=$3 AND main_site_device_id=$6
+   AND desired_path='direct' AND current_path='direct'`,
+		path.UserID, path.ClientDeviceID, path.Generation, clientEndpoint, hubEndpoint, path.MainSiteDeviceID)
+	return tag.RowsAffected() > 0, err
 }
 
 func (q *Queries) EnsurePeerPath(ctx context.Context, userID, clientID, mainSiteID, desired string) (PeerPath, error) {
@@ -66,6 +77,7 @@ func (q *Queries) CompletePeerPath(ctx context.Context, userID, clientID string)
 func (q *Queries) UpdatePeerPathVerification(ctx context.Context, userID, clientID, state, verifiedPath, message string, generation int64, verified bool) error {
 	_, err := q.db.Exec(ctx, `UPDATE peer_paths SET verification_state=$3, verified_path=CASE WHEN $7 THEN $4 ELSE verified_path END,
  verified_generation=CASE WHEN $7 THEN $6 ELSE verified_generation END, verification_error=$5,
+ endpoint_trial=CASE WHEN $7 THEN 0 ELSE endpoint_trial END,
  verified_at=CASE WHEN $7 THEN (
    SELECT min(a.verified_at) FROM device_path_applied a
    WHERE a.client_device_id=peer_paths.client_device_id

@@ -30,7 +30,11 @@ func ParseWGDump(output string) []PeerStat {
 			v := time.Unix(hs, 0).UTC()
 			at = &v
 		}
-		result = append(result, PeerStat{PublicKey: fields[0], LatestHandshake: at, RxBytes: rx, TxBytes: tx})
+		item := PeerStat{PublicKey: fields[0], LatestHandshake: at, RxBytes: rx, TxBytes: tx}
+		if fields[2] != "(none)" {
+			item.Endpoint = fields[2]
+		}
+		result = append(result, item)
 	}
 	return result
 }
@@ -62,6 +66,10 @@ func ParseUAPIStats(output string) []PeerStat {
 					t := time.Unix(v, 0).UTC()
 					current.LatestHandshake = &t
 				}
+			}
+		case "endpoint":
+			if current != nil {
+				current.Endpoint = value
 			}
 		case "rx_bytes":
 			if current != nil {

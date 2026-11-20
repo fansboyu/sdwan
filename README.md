@@ -1,6 +1,8 @@
 # SD-WAN Controller
 
-`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.2.4`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent 和子网路由。
+`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.2.5`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent 和子网路由。
+
+`v1.2.5`：Bootstrap 仅以近期 WireGuard 握手或收包计数增长作为刷新证据；Controller 在重新生成候选时降低两分钟未见证据的 Bootstrap 地址优先级，并协调单 Hub 链路的直连候选试探。新 Agent 只应用 Controller 的选路，诊断页可查看节点上报的直连 Endpoint（旧 Agent 可能仍上报配置地址）。严格 NAT 或 UDP 屏蔽下不保证直连成功。
 
 生产默认控制器域名：
 

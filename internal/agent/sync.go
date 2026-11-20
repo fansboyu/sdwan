@@ -90,21 +90,7 @@ func RunSyncCycle(ctx context.Context, opts SyncCycleOptions) (time.Duration, er
 
 	if !pollResp.NetmapChanged && !opts.ForceApply && opts.IsStarted() {
 		if cfg.LastNetmap != nil {
-			effectiveNetmap, qualities, localChanged := ApplyLocalPathFallback(*cfg.LastNetmap, cfg.PathQualities)
-			cfg.PathQualities = qualities
-			if localChanged {
-				if err := opts.ApplyNetmap(ctx, &cfg, effectiveNetmap); err != nil {
-					return interval, err
-				}
-				cfg.NetmapVersion = effectiveNetmap.Version
-				cfg.AppliedPaths = AppliedPathReports(ctx, effectiveNetmap)
-				if err := SaveConfig(opts.ConfigPath, cfg); err != nil {
-					return interval, err
-				}
-				log.Printf("local path fallback applied: version=%d peers=%d", effectiveNetmap.Version, len(effectiveNetmap.Peers))
-				return interval, nil
-			}
-			cfg.AppliedPaths = AppliedPathReports(ctx, effectiveNetmap)
+			cfg.AppliedPaths = AppliedPathReports(ctx, *cfg.LastNetmap)
 		}
 		if err := SaveConfig(opts.ConfigPath, cfg); err != nil {
 			return interval, err
@@ -119,17 +105,15 @@ func RunSyncCycle(ctx context.Context, opts SyncCycleOptions) (time.Duration, er
 	}
 	cfg.LastNetmap = &netmap
 	cfg.PathQualities = UpdatePathQualitiesFromNetmap(netmap, peerStats, cfg.PathQualities)
-	effectiveNetmap, qualities, _ := ApplyLocalPathFallback(netmap, cfg.PathQualities)
-	cfg.PathQualities = qualities
-	if err := opts.ApplyNetmap(ctx, &cfg, effectiveNetmap); err != nil {
+	if err := opts.ApplyNetmap(ctx, &cfg, netmap); err != nil {
 		return interval, err
 	}
 	cfg.NetmapVersion = netmap.Version
-	cfg.AppliedPaths = AppliedPathReports(ctx, effectiveNetmap)
+	cfg.AppliedPaths = AppliedPathReports(ctx, netmap)
 	if err := SaveConfig(opts.ConfigPath, cfg); err != nil {
 		return interval, err
 	}
 	log.Printf("netmap applied: version=%d role=%s peers=%d endpoints=%d bootstrap=%v",
-		effectiveNetmap.Version, defaultString(effectiveNetmap.Self.SiteRole, "client"), len(effectiveNetmap.Peers), len(endpoints), effectiveNetmap.BootstrapPeer != nil)
+		netmap.Version, defaultString(netmap.Self.SiteRole, "client"), len(netmap.Peers), len(endpoints), netmap.BootstrapPeer != nil)
 	return interval, nil
 }

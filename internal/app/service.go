@@ -691,7 +691,7 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 		if strings.TrimSpace(endpoint.Address) == "" {
 			continue
 		}
-		if endpoint.Type == "stun" {
+		if endpoint.Type == "stun" || endpoint.Type == "bootstrap" {
 			continue
 		}
 		endpointType := defaultString(endpoint.Type, "unknown")
@@ -1059,9 +1059,16 @@ func orderedEndpointAddresses(endpoints []sqlc.DeviceEndpoint) []string {
 		return nil
 	}
 	items := append([]sqlc.DeviceEndpoint(nil), endpoints...)
+	cutoff := time.Now().Add(-2 * time.Minute)
 	sort.SliceStable(items, func(i, j int) bool {
 		left := endpointPriority(items[i].EndpointType)
 		right := endpointPriority(items[j].EndpointType)
+		if items[i].EndpointType == "bootstrap" && items[i].UpdatedAt.Before(cutoff) {
+			left = 8
+		}
+		if items[j].EndpointType == "bootstrap" && items[j].UpdatedAt.Before(cutoff) {
+			right = 8
+		}
 		if left != right {
 			return left < right
 		}
@@ -1226,6 +1233,11 @@ func (s *Service) ReportBootstrapEndpoint(ctx context.Context, bearer string, re
 	if publicKey == "" || endpoint == "" {
 		return errors.New("public_key and endpoint are required")
 	}
+	addr, err := netip.ParseAddrPort(endpoint)
+	if err != nil || addr.Port() == 0 || !addr.Addr().IsGlobalUnicast() || addr.Addr().Zone() != "" {
+		return errors.New("invalid WireGuard endpoint")
+	}
+	endpoint = addr.String()
 	device, err := s.store.Queries.GetDeviceByPublicKey(ctx, publicKey)
 	if err != nil {
 		return err

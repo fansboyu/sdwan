@@ -174,6 +174,7 @@ func ApplyLocalPathFallback(netmap Netmap, existing []PathQualityState) (Netmap,
 func refreshPathQuality(item PathQualityState, stat PeerStat, now time.Time) PathQualityState {
 	wasHealthy := pathQualityHealthy(item, now, pathQualityHealthyWindow)
 	if stat.PublicKey != "" {
+		item.Endpoint = stat.Endpoint
 		if stat.RxBytes > item.RxBytes {
 			t := now
 			item.LastRxAt = &t

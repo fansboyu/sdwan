@@ -111,6 +111,7 @@ type NetmapPeer struct {
 
 type PeerStat struct {
 	PublicKey       string     `json:"public_key"`
+	Endpoint        string     `json:"-"`
 	LatestHandshake *time.Time `json:"latest_handshake_at,omitempty"`
 	RxBytes         int64      `json:"rx_bytes"`
 	TxBytes         int64      `json:"tx_bytes"`

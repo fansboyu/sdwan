@@ -1,6 +1,6 @@
 # SD-WAN Controller
 
-`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.2.2`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent、子网路由和免费升级业务逻辑。
+`sdwan` 是一个轻量级 Tailscale-like SD-WAN 产品骨架。当前版本是 `v1.2.4`，已经包含控制端、Web 管理台、Linux Agent、Windows Agent、Bootstrap Agent、Relay Agent 和子网路由。
 
 生产默认控制器域名：
 
@@ -41,7 +41,7 @@ controller.englishlisten.cn
 ### Controller
 
 - Go + `net/http` + PostgreSQL + `pgx/v5`
-- 用户注册、登录、账号状态、订阅状态
+- 用户注册、登录和账号状态
 - 设备注册、心跳、Endpoint 上报、Netmap 下发
 - 子网路由审批和下发
 - Relay 节点管理、健康校验和按客户端路径状态机
@@ -53,7 +53,6 @@ controller.englishlisten.cn
 - 深色科技风登录页和主页
 - 设备列表、设备详情、主节点设置
 - 子网路由审批
-- 套餐升级和免费升级入口
 - Relay 节点创建、启用、禁用
 - 直连、自动中继、强制中继三种连接模式
 - 每个客户端当前路径、目标路径和 generation 展示
@@ -96,19 +95,9 @@ controller.englishlisten.cn
 - 自动模式按“客户端—主站点”链路独立 fallback
 - 可使用 `deploy/install/install-relay.sh` 安装 Linux amd64 Agent 和 systemd 服务；WireGuard 接口、路由和防火墙仍需按部署文档预先配置
 
-## 套餐逻辑
+## 使用权限
 
-当前有两个付费能力版本：
-
-- `subnet`：快启子网服务，支持主节点和子网路由。
-- `relay`：自行搭建 Relay，包含 `subnet` 的全部能力，并开放 Relay 模式。
-
-当前用户量较少时支持免费升级：
-
-- 每个账号最多可免费升级 12 个月。
-- 从免费版升级到 `subnet` 会按剩余免费月数创建免费订阅。
-- 已免费升级到 `subnet` 后，再升级到 `relay` 不额外增加月份，只升级能力范围。
-- `relay` 是更高版本，拥有全部功能。
+所有正常账户均可使用子网路由和自建 Relay，无需开通套餐。设备配额、路由审批和 Relay 健康检查继续生效。旧订阅数据保留，仅用于兼容和回滚。
 
 ## 网络模式
 
@@ -286,8 +275,6 @@ Controller 启动时会自动执行 migration。当前 migration 版本：
 - `POST /admin/devices/{id}/main-site`
 - `GET /admin/subnet-routes`
 - `PATCH /admin/subnet-routes/{id}/approval`
-- `POST /admin/subscription/free-upgrade`
-- `POST /admin/subscription/cancel`
 - `POST /admin/relays`
 - `POST /admin/relays/{id}/enable`
 - `POST /admin/relays/{id}/disable`

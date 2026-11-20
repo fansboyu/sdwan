@@ -6,7 +6,6 @@ type User struct {
 	ID            string    `json:"id"`
 	Email         string    `json:"email"`
 	PasswordHash  string    `json:"-"`
-	PlanCode      string    `json:"plan_code"`
 	OverlayCidr   string    `json:"overlay_cidr"`
 	MaxDevices    int32     `json:"max_devices"`
 	NetmapVersion int64     `json:"netmap_version"`
@@ -33,28 +32,6 @@ type EmailVerification struct {
 	ConsumedAt   *time.Time `json:"consumed_at,omitempty"`
 	AttemptCount int32      `json:"attempt_count"`
 	CreatedAt    time.Time  `json:"created_at"`
-}
-
-type Plan struct {
-	Code            string    `json:"code"`
-	Name            string    `json:"name"`
-	PriceCents      int32     `json:"price_cents"`
-	MaxDevices      int32     `json:"max_devices"`
-	EnableSubnet    bool      `json:"enable_subnet"`
-	EnableSelfRelay bool      `json:"enable_self_relay"`
-	CreatedAt       time.Time `json:"created_at"`
-}
-
-type Subscription struct {
-	ID         string     `json:"id"`
-	UserID     string     `json:"user_id"`
-	PlanCode   string     `json:"plan_code"`
-	Status     string     `json:"status"`
-	Source     string     `json:"source"`
-	FreeMonths int32      `json:"free_months"`
-	StartsAt   time.Time  `json:"starts_at"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type Device struct {

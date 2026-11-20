@@ -27,21 +27,20 @@ import (
 )
 
 const (
-	userCIDRPrefix                = 24
-	globalBaseCIDR                = "100.64.0.0/10"
-	defaultRelayVirtualIP         = "100.254.253.1"
-	maxNodeLimit                  = 254
-	ipAllocRetries                = 3
-	endpointKeep                  = 3
-	maxFreeUpgradeMonths          = 12
-	subscriptionSourceFreeUpgrade = "free_upgrade"
-	siteRoleClient                = "client"
-	siteRoleMain                  = "main_site"
-	emailPurposeRegister          = "register"
+	userCIDRPrefix        = 24
+	globalBaseCIDR        = "100.64.0.0/10"
+	defaultRelayVirtualIP = "100.254.253.1"
+	maxNodeLimit          = 254
+	ipAllocRetries        = 3
+	endpointKeep          = 3
+
+	siteRoleClient       = "client"
+	siteRoleMain         = "main_site"
+	emailPurposeRegister = "register"
 )
 
 var ErrUnauthorized = errors.New("unauthorized")
-var ErrUpgradeRequired = errors.New("upgrade required")
+var ErrDeviceLimitReached = errors.New("device limit reached")
 var ErrEmailAlreadyRegistered = errors.New("邮箱名已经注册，请更换其他邮箱")
 var ErrEmailCodeNotConfigured = errors.New("邮件服务未配置，请联系管理员")
 var ErrEmailCodeCooldown = errors.New("验证码发送太频繁，请稍后再试")
@@ -235,43 +234,22 @@ func (s *Service) createAdminSession(ctx context.Context, user sqlc.User) (AuthR
 }
 
 type AccountSummary struct {
-	User           sqlc.User                  `json:"user"`
-	DeviceCount    int32                      `json:"device_count"`
-	MainSite       *sqlc.Device               `json:"main_site,omitempty"`
-	Plans          []sqlc.Plan                `json:"plans"`
+	User        sqlc.User    `json:"user"`
+	DeviceCount int32        `json:"device_count"`
+	MainSite    *sqlc.Device `json:"main_site,omitempty"`
+
 	SubnetRoutes   []sqlc.SubnetRoute         `json:"subnet_routes"`
 	RouteConflicts []sqlc.SubnetRouteConflict `json:"route_conflicts"`
 	Relays         []sqlc.Relay               `json:"relays"`
 	ActiveRelay    *sqlc.Relay                `json:"active_relay,omitempty"`
-	Subscription   *sqlc.Subscription         `json:"subscription,omitempty"`
-	FreeUpgrade    FreeUpgradeSummary         `json:"free_upgrade"`
-	Capabilities   AccountCapabilities        `json:"capabilities"`
-	PeerPaths      []sqlc.PeerPath            `json:"peer_paths"`
-	PathQuality    []sqlc.DevicePathQuality   `json:"path_quality"`
-	RelayHealthy   bool                       `json:"relay_healthy"`
-}
 
-type FreeUpgradeSummary struct {
-	MonthsUsed      int32 `json:"months_used"`
-	MonthsRemaining int32 `json:"months_remaining"`
-	MaxMonths       int32 `json:"max_months"`
-}
-
-type AccountCapabilities struct {
-	EnableSubnet    bool `json:"enable_subnet"`
-	EnableSelfRelay bool `json:"enable_self_relay"`
+	PeerPaths    []sqlc.PeerPath          `json:"peer_paths"`
+	PathQuality  []sqlc.DevicePathQuality `json:"path_quality"`
+	RelayHealthy bool                     `json:"relay_healthy"`
 }
 
 func (s *Service) AccountSummary(ctx context.Context, user sqlc.User) (AccountSummary, error) {
-	user, subscription, freeUsed, err := s.refreshSubscriptionState(ctx, user)
-	if err != nil {
-		return AccountSummary{}, err
-	}
 	count, err := s.store.Queries.CountActiveDevicesByUser(ctx, user.ID)
-	if err != nil {
-		return AccountSummary{}, err
-	}
-	plans, err := s.store.Queries.ListPlans(ctx)
 	if err != nil {
 		return AccountSummary{}, err
 	}
@@ -324,25 +302,19 @@ func (s *Service) AccountSummary(ctx context.Context, user sqlc.User) (AccountSu
 		active.HealthStatus = relayHealthStatus(*active)
 	}
 	return AccountSummary{
-		User:           user,
-		DeviceCount:    count,
-		MainSite:       mainSite,
-		Plans:          plans,
+		User:        user,
+		DeviceCount: count,
+		MainSite:    mainSite,
+
 		SubnetRoutes:   subnets,
 		RouteConflicts: conflicts,
 		Relays:         relays,
 		ActiveRelay:    active,
-		Subscription:   subscription,
-		FreeUpgrade:    freeUpgradeSummary(freeUsed),
-		Capabilities:   capabilitiesForPlan(user.PlanCode),
-		PeerPaths:      paths,
-		PathQuality:    pathQuality,
-		RelayHealthy:   healthy,
-	}, nil
-}
 
-func (s *Service) ListPlans(ctx context.Context) ([]sqlc.Plan, error) {
-	return s.store.Queries.ListPlans(ctx)
+		PeerPaths:    paths,
+		PathQuality:  pathQuality,
+		RelayHealthy: healthy,
+	}, nil
 }
 
 type CreateRelayRequest struct {
@@ -362,9 +334,6 @@ type RelayModeRequest struct {
 }
 
 func (s *Service) CreateRelay(ctx context.Context, user sqlc.User, req CreateRelayRequest) (CreateRelayResponse, error) {
-	if !capabilitiesForPlan(user.PlanCode).EnableSelfRelay {
-		return CreateRelayResponse{}, ErrUpgradeRequired
-	}
 	publicKey := strings.TrimSpace(req.PublicKey)
 	endpoint := strings.TrimSpace(req.Endpoint)
 	if publicKey == "" || endpoint == "" {
@@ -399,9 +368,6 @@ func (s *Service) CreateRelay(ctx context.Context, user sqlc.User, req CreateRel
 }
 
 func (s *Service) EnableRelay(ctx context.Context, user sqlc.User, relayID string) (sqlc.Relay, error) {
-	if !capabilitiesForPlan(user.PlanCode).EnableSelfRelay {
-		return sqlc.Relay{}, ErrUpgradeRequired
-	}
 	var relay sqlc.Relay
 	if err := s.store.WithTx(ctx, func(q *sqlc.Queries) error {
 		if _, err := q.DisableRelaysByUser(ctx, user.ID); err != nil {
@@ -445,118 +411,6 @@ func (s *Service) SetRelayMode(ctx context.Context, user sqlc.User, enabled bool
 	return s.SetPathMode(ctx, user, mode)
 }
 
-type SubscriptionSummary struct {
-	Subscription *sqlc.Subscription `json:"subscription,omitempty"`
-	FreeUpgrade  FreeUpgradeSummary `json:"free_upgrade"`
-}
-
-type FreeUpgradeRequest struct {
-	PlanCode string `json:"plan_code"`
-	Months   int32  `json:"months"`
-}
-
-func (s *Service) SubscriptionSummary(ctx context.Context, user sqlc.User) (SubscriptionSummary, error) {
-	_, subscription, freeUsed, err := s.refreshSubscriptionState(ctx, user)
-	if err != nil {
-		return SubscriptionSummary{}, err
-	}
-	return SubscriptionSummary{
-		Subscription: subscription,
-		FreeUpgrade:  freeUpgradeSummary(freeUsed),
-	}, nil
-}
-
-func (s *Service) FreeUpgrade(ctx context.Context, user sqlc.User, req FreeUpgradeRequest) (SubscriptionSummary, error) {
-	planCode := strings.TrimSpace(req.PlanCode)
-	if planCode != "subnet" && planCode != "relay" {
-		return SubscriptionSummary{}, errors.New("plan_code must be subnet or relay")
-	}
-	if _, err := s.planByCode(ctx, planCode); err != nil {
-		return SubscriptionSummary{}, err
-	}
-	_, activeSubscription, freeUsed, err := s.refreshSubscriptionState(ctx, user)
-	if err != nil {
-		return SubscriptionSummary{}, err
-	}
-
-	if activeSubscription != nil && activeSubscription.Source == subscriptionSourceFreeUpgrade {
-		if planCode == activeSubscription.PlanCode {
-			return SubscriptionSummary{
-				Subscription: activeSubscription,
-				FreeUpgrade:  freeUpgradeSummary(freeUsed),
-			}, nil
-		}
-		if planRank(planCode) < planRank(activeSubscription.PlanCode) {
-			return SubscriptionSummary{}, errors.New("当前版本已包含该能力")
-		}
-		var subscription sqlc.Subscription
-		if err := s.store.WithTx(ctx, func(q *sqlc.Queries) error {
-			updated, err := q.UpdateActiveSubscriptionPlan(ctx, activeSubscription.ID, planCode)
-			if err != nil {
-				return err
-			}
-			subscription = updated
-			return q.UpdateUserPlan(ctx, user.ID, planCode)
-		}); err != nil {
-			return SubscriptionSummary{}, err
-		}
-		return SubscriptionSummary{
-			Subscription: &subscription,
-			FreeUpgrade:  freeUpgradeSummary(freeUsed),
-		}, nil
-	}
-
-	if req.Months <= 0 || req.Months > maxFreeUpgradeMonths {
-		return SubscriptionSummary{}, errors.New("months must be between 1 and 12")
-	}
-	if freeUsed+req.Months > maxFreeUpgradeMonths {
-		return SubscriptionSummary{}, errors.New("free upgrade months exceeded")
-	}
-
-	now := time.Now().UTC()
-	expiresAt := now.AddDate(0, int(req.Months), 0)
-	var subscription sqlc.Subscription
-	if err := s.store.WithTx(ctx, func(q *sqlc.Queries) error {
-		if _, err := q.CancelActiveSubscriptionsByUser(ctx, user.ID); err != nil {
-			return err
-		}
-		created, err := q.CreateSubscription(ctx, sqlc.CreateSubscriptionParams{
-			ID:         "sub_" + ksuid.New().String(),
-			UserID:     user.ID,
-			PlanCode:   planCode,
-			Source:     subscriptionSourceFreeUpgrade,
-			FreeMonths: req.Months,
-			StartsAt:   now,
-			ExpiresAt:  &expiresAt,
-		})
-		if err != nil {
-			return err
-		}
-		subscription = created
-		return q.UpdateUserPlan(ctx, user.ID, planCode)
-	}); err != nil {
-		return SubscriptionSummary{}, err
-	}
-
-	freeUsed += req.Months
-	return SubscriptionSummary{
-		Subscription: &subscription,
-		FreeUpgrade:  freeUpgradeSummary(freeUsed),
-	}, nil
-}
-
-func (s *Service) CancelSubscription(ctx context.Context, user sqlc.User) (SubscriptionSummary, error) {
-	if err := s.store.WithTx(ctx, func(q *sqlc.Queries) error {
-		if _, err := q.CancelActiveSubscriptionsByUser(ctx, user.ID); err != nil {
-			return err
-		}
-		return q.UpdateUserPlan(ctx, user.ID, "free")
-	}); err != nil {
-		return SubscriptionSummary{}, err
-	}
-	return s.SubscriptionSummary(ctx, user)
-}
-
 type RegisterDeviceRequest struct {
 	AdminToken    string `json:"admin_token"`
 	Hostname      string `json:"hostname"`
@@ -586,7 +440,7 @@ func (s *Service) RegisterDevice(ctx context.Context, req RegisterDeviceRequest)
 	}
 	maxDevices := effectiveDeviceLimit(user.MaxDevices)
 	if count >= maxDevices {
-		return RegisterDeviceResponse{}, ErrUpgradeRequired
+		return RegisterDeviceResponse{}, ErrDeviceLimitReached
 	}
 	deviceToken, err := randomToken("sdwan_device")
 	if err != nil {
@@ -715,9 +569,6 @@ type SubnetRouteApprovalRequest struct {
 }
 
 func (s *Service) ApproveSubnetRoute(ctx context.Context, user sqlc.User, routeID string, approved bool) (sqlc.SubnetRoute, error) {
-	if !capabilitiesForPlan(user.PlanCode).EnableSubnet {
-		return sqlc.SubnetRoute{}, ErrUpgradeRequired
-	}
 	var route sqlc.SubnetRoute
 	if err := s.store.WithTx(ctx, func(q *sqlc.Queries) error {
 		if approved {
@@ -931,13 +782,6 @@ func (s *Service) syncAdvertisedSubnetRoutes(ctx context.Context, device sqlc.De
 		if device.SiteRole != siteRoleMain {
 			return false, errors.New("only main site can advertise subnet routes")
 		}
-		user, err := s.store.Queries.GetUser(ctx, device.UserID)
-		if err != nil {
-			return false, err
-		}
-		if !capabilitiesForPlan(user.PlanCode).EnableSubnet {
-			return false, ErrUpgradeRequired
-		}
 		existing, err := s.store.Queries.ListSubnetRoutesByUser(ctx, device.UserID)
 		if err != nil {
 			return false, err
@@ -1086,10 +930,6 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 	if err != nil {
 		return Netmap{}, err
 	}
-	user, _, _, err = s.refreshSubscriptionState(ctx, user)
-	if err != nil {
-		return Netmap{}, err
-	}
 	devices, err := s.store.Queries.ListDevicesByUser(ctx, self.UserID)
 	if err != nil {
 		return Netmap{}, err
@@ -1117,7 +957,7 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 		return netmap, nil
 	}
 
-	if user.RelayMode && capabilitiesForPlan(user.PlanCode).EnableSelfRelay {
+	if user.RelayMode {
 		if relay, err := s.store.Queries.GetActiveRelayByUser(ctx, self.UserID); err == nil {
 			allowedIPs := []string{user.OverlayCidr}
 			if self.SiteRole != siteRoleMain {
@@ -1661,81 +1501,6 @@ func effectiveDeviceLimit(limit int32) int32 {
 	return limit
 }
 
-func freeUpgradeSummary(used int32) FreeUpgradeSummary {
-	remaining := maxFreeUpgradeMonths - used
-	if remaining < 0 {
-		remaining = 0
-	}
-	return FreeUpgradeSummary{
-		MonthsUsed:      used,
-		MonthsRemaining: remaining,
-		MaxMonths:       maxFreeUpgradeMonths,
-	}
-}
-
-func planRank(code string) int {
-	switch code {
-	case "relay":
-		return 2
-	case "subnet":
-		return 1
-	default:
-		return 0
-	}
-}
-
-func (s *Service) refreshSubscriptionState(ctx context.Context, user sqlc.User) (sqlc.User, *sqlc.Subscription, int32, error) {
-	err := s.store.WithTx(ctx, func(q *sqlc.Queries) error {
-		expired, err := q.ExpireActiveSubscriptionsByUser(ctx, user.ID)
-		if err != nil || expired == 0 {
-			return err
-		}
-		if err := q.UpdateUserPlan(ctx, user.ID, "free"); err != nil {
-			return err
-		}
-		return q.BumpNetmapVersion(ctx, user.ID)
-	})
-	if err != nil {
-		return sqlc.User{}, nil, 0, err
-	}
-
-	updatedUser, err := s.store.Queries.GetUser(ctx, user.ID)
-	if err != nil {
-		return sqlc.User{}, nil, 0, err
-	}
-	updatedUser.PasswordHash = ""
-
-	freeUsed, err := s.store.Queries.SumFreeUpgradeMonthsByUser(ctx, user.ID)
-	if err != nil {
-		return sqlc.User{}, nil, 0, err
-	}
-
-	subscription, err := s.store.Queries.GetActiveSubscriptionByUser(ctx, user.ID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return updatedUser, nil, freeUsed, nil
-		}
-		return sqlc.User{}, nil, 0, err
-	}
-	if subscription.ExpiresAt != nil && !subscription.ExpiresAt.After(time.Now().UTC()) {
-		return updatedUser, nil, freeUsed, nil
-	}
-	return updatedUser, &subscription, freeUsed, nil
-}
-
-func (s *Service) planByCode(ctx context.Context, code string) (sqlc.Plan, error) {
-	plans, err := s.store.Queries.ListPlans(ctx)
-	if err != nil {
-		return sqlc.Plan{}, err
-	}
-	for _, plan := range plans {
-		if plan.Code == code {
-			return plan, nil
-		}
-	}
-	return sqlc.Plan{}, errors.New("plan not found")
-}
-
 func isDeviceVirtualIPConflict(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
@@ -1750,17 +1515,6 @@ func isUserEmailConflict(err error) bool {
 		return false
 	}
 	return pgErr.Code == "23505" && pgErr.ConstraintName == "users_email_key"
-}
-
-func capabilitiesForPlan(code string) AccountCapabilities {
-	switch code {
-	case "relay":
-		return AccountCapabilities{EnableSubnet: true, EnableSelfRelay: true}
-	case "subnet":
-		return AccountCapabilities{EnableSubnet: true, EnableSelfRelay: false}
-	default:
-		return AccountCapabilities{EnableSubnet: false, EnableSelfRelay: false}
-	}
 }
 
 func tokenHash(token string) string {

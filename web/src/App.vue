@@ -18,7 +18,6 @@ const emailCodeCooldown = ref(0)
 const devices = ref([])
 const selectedDevice = ref(null)
 const error = ref('')
-const showPlanModal = ref(false)
 const relayForm = ref({ name: '', public_key: '', endpoint: '', virtual_ip: '' })
 const relayToken = ref('')
 const relayInstallCommand = 'curl -fsSL https://controller.englishlisten.cn/downloads/v1.2.2/install-relay.sh | sudo sh'
@@ -40,7 +39,7 @@ const pageMeta = {
   routes: ['子网路由', '检查网关状态、审批 LAN 路由并查看服务探测'],
   paths: ['连接路径', '查看直连与 Relay 候选、当前路径和切换状态'],
   relays: ['Relay', '管理企业自建 Relay 和账户路径模式'],
-  settings: ['企业设置', '查看地址池、套餐和设备入网凭证'],
+  settings: ['企业设置', '查看地址池和设备入网凭证'],
 }
 
 function navigate(view) {
@@ -70,18 +69,8 @@ const messages = {
     enrollmentToken: '设备入网 Token',
     tokenNote: '当前版本 Admin Token 同时作为设备首次入网 Token。设备注册成功后会获得独立 Device Token，后续轮询和网络视图不依赖 Admin Token。',
     addressPool: '地址池',
-    plan: '当前套餐',
     devices: '设备',
     netmap: '网络视图',
-    capabilities: '能力',
-    subnetFeature: '快启子网服务',
-    relayFeature: '自行搭建 Relay',
-    enabled: '已开通',
-    disabled: '未开通',
-    upgrade: '查看升级',
-    planTitle: '服务等级',
-    planDesc: '支付接口暂时不接入，当前只展示套餐能力。',
-    monthly: '/月',
     close: '关闭',
     deviceList: '设备节点',
     noDevices: '暂无设备',
@@ -123,18 +112,8 @@ const messages = {
     enrollmentToken: 'Device Enrollment Token',
     tokenNote: 'In this version, the Admin Token also works as the first-time device enrollment token. Registered devices receive an independent Device Token.',
     addressPool: 'Address Pool',
-    plan: 'Plan',
     devices: 'Devices',
     netmap: 'Netmap',
-    capabilities: 'Capabilities',
-    subnetFeature: 'Quick Subnet Service',
-    relayFeature: 'Self-hosted Relay',
-    enabled: 'Enabled',
-    disabled: 'Disabled',
-    upgrade: 'View Plans',
-    planTitle: 'Service Levels',
-    planDesc: 'Payment is not connected yet. Plans are display-only for now.',
-    monthly: '/month',
     close: 'Close',
     deviceList: 'Device Nodes',
     noDevices: 'No devices yet',
@@ -228,11 +207,6 @@ function peerPathQuality(path) {
 function pathVerificationLabel(path) {
   const labels = { verified: '已验证', verifying: '验证中', failed: '探测失败', path_mismatch: '两端路径不一致' }
   return labels[path.verification_state] || '等待 Agent 上报'
-}
-
-function formatPrice(cents) {
-  if (!cents) return locale.value === 'zh' ? '免费' : 'Free'
-  return `￥${(cents / 100).toFixed(1)}`
 }
 
 async function readPayload(response) {
@@ -368,32 +342,6 @@ function roleLabel(role) {
   return role === 'main_site' ? t('mainSite') : t('client')
 }
 
-function planRank(code) {
-  if (code === 'relay') return 2
-  if (code === 'subnet') return 1
-  return 0
-}
-
-function canFreeUpgrade(plan) {
-  if (!plan || plan.code === 'free') return false
-  const active = account.value?.subscription
-  const remaining = account.value?.free_upgrade?.months_remaining || 0
-  if (!active) return remaining > 0
-  if (active.source !== 'free_upgrade') return remaining > 0
-  return planRank(plan.code) > planRank(active.plan_code)
-}
-
-function freeUpgradeButtonText(plan) {
-  const active = account.value?.subscription
-  if (active?.source === 'free_upgrade') {
-    if (active.plan_code === plan.code) return '已开通'
-    if (planRank(plan.code) > planRank(active.plan_code)) return '升级到该版本'
-    return '已包含该能力'
-  }
-  const months = Math.min(12, account.value?.free_upgrade?.months_remaining || 0)
-  return `免费升级 ${months} 个月`
-}
-
 async function setMainSite(device) {
   error.value = ''
   const response = await fetch(`${apiBase}/admin/devices/${device.id}/main-site`, {
@@ -412,50 +360,6 @@ async function setMainSite(device) {
   if (selectedDevice.value?.device?.id === device.id) {
     selectedDevice.value = await readPayload(response)
   }
-  await loadDashboard()
-}
-
-async function freeUpgrade(plan) {
-  error.value = ''
-  if (!canFreeUpgrade(plan)) return
-  const active = account.value?.subscription
-  const months = active?.source === 'free_upgrade' ? 0 : Math.min(12, account.value?.free_upgrade?.months_remaining || 0)
-  const response = await fetch(`${apiBase}/admin/subscription/free-upgrade`, {
-    method: 'POST',
-    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ plan_code: plan.code, months }),
-  })
-  if (response.status === 401) {
-    logout()
-    return
-  }
-  if (!response.ok) {
-    const payload = await readPayload(response)
-    error.value = payload.error || 'Free upgrade failed'
-    return
-  }
-  showPlanModal.value = false
-  await loadMe()
-  await loadDashboard()
-}
-
-async function cancelSubscription() {
-  error.value = ''
-  const response = await fetch(`${apiBase}/admin/subscription/cancel`, {
-    method: 'POST',
-    headers: authHeaders(),
-  })
-  if (response.status === 401) {
-    logout()
-    return
-  }
-  if (!response.ok) {
-    const payload = await readPayload(response)
-    error.value = payload.error || 'Cancel subscription failed'
-    return
-  }
-  showPlanModal.value = false
-  await loadMe()
   await loadDashboard()
 }
 
@@ -683,7 +587,6 @@ onMounted(async () => {
             <div><p class="page-eyebrow">{{ user.email }}</p><h1>{{ pageMeta[activeView][0] }}</h1><p class="page-description">{{ pageMeta[activeView][1] }}</p></div>
             <div class="page-heading-actions">
               <span v-if="account" class="sync-label">Netmap v{{ account.user.netmap_version }}</span>
-              <button v-if="activeView === 'settings'" class="action-button primary" type="button" @click="showPlanModal = true">查看套餐</button>
             </div>
           </header>
 
@@ -755,7 +658,7 @@ onMounted(async () => {
               <div class="route-conflict-row" v-for="item in account.route_conflicts" :key="item.id"><span class="route-status" :class="item.resolved_at ? 'approved' : 'waiting'">{{ item.resolved_at ? '已解决' : '待处理' }}</span><code>{{ item.cidr }}</code><span>{{ item.details }}</span><small>{{ deviceLabel(item.device_id) }} · {{ formatTime(item.created_at) }}</small></div>
             </section>
             <section class="content-section">
-              <div class="section-heading"><div><h2>已发布的 LAN 路由</h2><p>批准路由才会加入客户端 Netmap；网关状态与服务探测用于辅助诊断。</p></div><span class="section-meta">{{ account.capabilities.enable_subnet ? '套餐已支持' : '当前套餐不支持' }}</span></div>
+              <div class="section-heading"><div><h2>已发布的 LAN 路由</h2><p>批准路由才会加入客户端 Netmap；网关状态与服务探测用于辅助诊断。</p></div></div>
               <div class="data-table">
                 <div class="data-row route-table-head"><span>网段</span><span>发布设备</span><span>审批</span><span>网关诊断</span><span>TCP 服务</span><span>操作</span></div>
                 <div class="data-row route-table-row" v-for="route in account.subnet_routes || []" :key="route.id">
@@ -795,36 +698,26 @@ onMounted(async () => {
                 <label><span>WireGuard 公钥</span><input v-model="relayForm.public_key" placeholder="Relay public key" required /></label>
                 <label><span>公网 Endpoint</span><input v-model="relayForm.endpoint" placeholder="relay.example.com:51873" required /></label>
                 <label><span>虚拟 IP（可选）</span><input v-model="relayForm.virtual_ip" placeholder="默认 100.254.253.1" /></label>
-                <button class="action-button primary" type="submit" :disabled="!account.capabilities.enable_self_relay">创建 Relay</button>
+                <button class="action-button primary" type="submit">创建 Relay</button>
               </form>
               <div class="one-time-token" v-if="relayToken"><strong>Relay Token（仅显示一次）</strong><code>{{ relayToken }}</code><span>在已启动 WireGuard 接口的 Relay 主机运行安装命令，再按提示粘贴 Token。</span><div class="relay-install-command"><code>{{ relayInstallCommand }}</code><button class="mini-action" type="button" @click="copyRelayInstallCommand">复制命令</button></div></div>
               <div class="data-table">
                 <div class="data-row relay-table-head"><span>Relay</span><span>虚拟 IP</span><span>Endpoint</span><span>运行状态</span><span>同步 / 版本</span><span>操作</span></div>
                 <div class="data-row relay-table-row" v-for="relay in account.relays || []" :key="relay.id"><span><strong>{{ relay.name || '未命名 Relay' }}</strong><small>{{ relay.id }}</small></span><code>{{ relay.virtual_ip }}</code><code>{{ relay.endpoint }}</code><span class="route-status" :class="relay.health_status === 'healthy' ? 'approved' : 'waiting'">{{ relay.status }} · {{ relayHealthLabel(relay.health_status) }}</span><span>{{ relay.synced_peer_count }} peers · {{ relay.handshake_peer_count }} 有握手<small>最近握手 {{ formatTime(relay.last_handshake_at) }} · {{ relay.version || '版本未知' }}</small></span><span class="inline-actions"><button class="mini-action" type="button" :disabled="relay.status === 'active'" @click="enableRelay(relay)">启用</button><button class="mini-action danger-text" type="button" :disabled="relay.status !== 'active'" @click="disableRelay(relay)">停用</button></span></div>
-                <div class="table-empty" v-if="!(account.relays || []).length">暂无 Relay。当前套餐可能需要开通自建 Relay 能力。</div>
+                <div class="table-empty" v-if="!(account.relays || []).length">暂无 Relay。</div>
               </div>
             </section>
           </template>
 
           <template v-if="account && activeView === 'settings'">
             <section class="content-section settings-grid">
-              <div class="settings-block"><div class="section-heading"><div><h2>网络信息</h2><p>当前账号网络的基础配置。</p></div></div><dl class="detail-grid"><dt>账号</dt><dd>{{ user.email }}</dd><dt>Overlay 地址池</dt><dd><code>{{ account.user.overlay_cidr }}</code></dd><dt>设备上限</dt><dd>{{ account.user.max_devices }}</dd><dt>Netmap 版本</dt><dd>v{{ account.user.netmap_version }}</dd><dt>当前套餐</dt><dd>{{ account.user.plan_code }}</dd><dt>主站点</dt><dd>{{ account.main_site ? `${account.main_site.hostname} / ${account.main_site.virtual_ip}` : '尚未设置' }}</dd></dl></div>
-              <div class="settings-block"><div class="section-heading"><div><h2>套餐能力</h2><p>当前版本能力状态与升级入口。</p></div><button class="text-action" type="button" @click="showPlanModal = true">管理套餐 →</button></div><div class="setting-line"><span>子网路由</span><strong>{{ account.capabilities.enable_subnet ? '已开通' : '未开通' }}</strong></div><div class="setting-line"><span>自建 Relay</span><strong>{{ account.capabilities.enable_self_relay ? '已开通' : '未开通' }}</strong></div><div class="setting-line"><span>免费升级额度</span><strong>{{ account.free_upgrade?.months_remaining || 0 }} 个月</strong></div></div>
+              <div class="settings-block"><div class="section-heading"><div><h2>网络信息</h2><p>当前账号网络的基础配置。</p></div></div><dl class="detail-grid"><dt>账号</dt><dd>{{ user.email }}</dd><dt>Overlay 地址池</dt><dd><code>{{ account.user.overlay_cidr }}</code></dd><dt>设备上限</dt><dd>{{ account.user.max_devices }}</dd><dt>Netmap 版本</dt><dd>v{{ account.user.netmap_version }}</dd><dt>主站点</dt><dd>{{ account.main_site ? `${account.main_site.hostname} / ${account.main_site.virtual_ip}` : '尚未设置' }}</dd></dl></div>
               <div class="settings-block sensitive-block"><div class="section-heading"><div><h2>设备入网凭证</h2><p>当前版本 Admin Token 仍可用于首次设备注册，请勿公开分享。</p></div><button class="text-action" type="button" @click="showAdminToken = !showAdminToken">{{ showAdminToken ? '隐藏' : '显示' }}</button></div><code class="token-value">{{ showAdminToken ? adminToken : '••••••••••••••••••••••••' }}</code><p class="muted-copy">设备注册后会获得独立 Device Token。平台仍需进一步拆分短时入网凭证和设备审批。</p></div>
             </section>
           </template>
         </section>
       </div>
 
-      <div class="modal-backdrop" v-if="showPlanModal" @click.self="showPlanModal = false">
-        <section class="modal">
-          <div class="section-title"><h2>{{ t('planTitle') }}</h2><button class="ghost" type="button" @click="showPlanModal = false">{{ t('close') }}</button></div>
-          <p>{{ t('planDesc') }}</p>
-          <div class="main-site" v-if="account?.subscription"><span>当前订阅</span><strong>{{ account.subscription.plan_code }} · 到期 {{ formatTime(account.subscription.expires_at) }}</strong><button class="danger small" type="button" @click="cancelSubscription">取消订阅</button></div>
-          <div class="main-site"><span>免费升级额度</span><strong>{{ account?.free_upgrade?.months_remaining || 0 }} 个月剩余</strong></div>
-          <div class="plans"><article class="plan" v-for="plan in account?.plans || []" :key="plan.code"><strong>{{ plan.name }}</strong><div class="price">{{ formatPrice(plan.price_cents) }} <span v-if="plan.price_cents">{{ t('monthly') }}</span></div><p>设备上限：{{ plan.max_devices }}</p><p>{{ t('subnetFeature') }}：{{ plan.enable_subnet ? t('enabled') : t('disabled') }}</p><p>{{ t('relayFeature') }}：{{ plan.enable_self_relay ? t('enabled') : t('disabled') }}</p><button v-if="plan.code !== 'free'" type="button" :disabled="!canFreeUpgrade(plan)" @click="freeUpgrade(plan)">{{ freeUpgradeButtonText(plan) }}</button></article></div>
-        </section>
-      </div>
     </template>
   </main>
 </template>

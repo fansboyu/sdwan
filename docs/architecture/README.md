@@ -79,7 +79,7 @@ Relay 健康要求近期心跳、接口与 Peer 同步正常，并观察到最�
 
 ## 当前产品边界
 
-- Controller 负责身份、套餐、设备、虚拟 IP、netmap、endpoint、子网路由和 Relay 元数据。
+- Controller 负责身份、设备、虚拟 IP、netmap、endpoint、子网路由和 Relay 元数据。
 - Linux 和 Windows 客户端负责本机 WireGuard 数据面。
 - Bootstrap 发现服务通过服务端 WireGuard 观察客户端真实公网 endpoint。
 - Relay 支持按客户端独立的直连优先自动 fallback；当前仍限定单主站点和单活动自建 Relay。

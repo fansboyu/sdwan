@@ -16,7 +16,7 @@ const health = ref(null)
 const detail = ref(null)
 const checked = ref('')
 const nav = [['overview', '平台总览', LayoutDashboard], ['tenants', '企业管理', Building2], ['health', '服务健康', Activity]]
-const visible = computed(() => tenants.value.filter(t => [t.email, t.cidr, t.plan].some(value => value.toLowerCase().includes(filter.value.trim().toLowerCase()))))
+const visible = computed(() => tenants.value.filter(t => [t.email, t.cidr].some(value => value.toLowerCase().includes(filter.value.trim().toLowerCase()))))
 const totals = computed(() => tenants.value.reduce((sum, t) => ({ devices: sum.devices + t.devices, online: sum.online + t.online }), { devices: 0, online: 0 }))
 const fmt = value => value ? new Date(value).toLocaleString() : '—'
 const device = id => detail.value?.devices?.find(d => d.id === id)?.hostname || id
@@ -128,10 +128,10 @@ onMounted(() => { if (token.value) run(load) })
           </tbody></table>
         </section>
         <section v-if="view === 'tenants' && !detail" class="content-section">
-          <label class="platform-search"><Search :size="18" /><input v-model="filter" aria-label="搜索企业" placeholder="搜索账户、网段或套餐" /></label>
-          <div class="platform-table-wrap"><table class="platform-table"><thead><tr><th>账户</th><th>Overlay</th><th>套餐</th><th>设备 / 配额</th><th>近期在线</th><th>操作</th></tr></thead><tbody>
-            <tr v-for="t in visible" :key="t.id"><td>{{ t.email }}</td><td><code>{{ t.cidr }}</code></td><td>{{ t.plan }}</td><td>{{ t.devices }} / {{ t.max_devices }}</td><td>{{ t.online }}</td><td><button class="mini-action" type="button" :disabled="busy" @click="open(t.id)">查看诊断</button></td></tr>
-            <tr v-if="!busy && !visible.length && !error"><td colspan="6">没有匹配的企业</td></tr>
+          <label class="platform-search"><Search :size="18" /><input v-model="filter" aria-label="搜索企业" placeholder="搜索账户或网段" /></label>
+          <div class="platform-table-wrap"><table class="platform-table"><thead><tr><th>账户</th><th>Overlay</th><th>设备 / 配额</th><th>近期在线</th><th>操作</th></tr></thead><tbody>
+            <tr v-for="t in visible" :key="t.id"><td>{{ t.email }}</td><td><code>{{ t.cidr }}</code></td><td>{{ t.devices }} / {{ t.max_devices }}</td><td>{{ t.online }}</td><td><button class="mini-action" type="button" :disabled="busy" @click="open(t.id)">查看诊断</button></td></tr>
+            <tr v-if="!busy && !visible.length && !error"><td colspan="5">没有匹配的企业</td></tr>
           </tbody></table></div>
         </section>
         <template v-if="detail">

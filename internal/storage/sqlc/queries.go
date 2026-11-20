@@ -33,33 +33,33 @@ type CreateUserParams struct {
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, `INSERT INTO users (id, email, password_hash, overlay_cidr, max_devices)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at`,
+RETURNING id, email, password_hash, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at`,
 		arg.ID, arg.Email, arg.PasswordHash, arg.OverlayCidr, arg.MaxDevices)
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
 	return u, err
 }
 
 func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
-	row := q.db.QueryRow(ctx, `SELECT id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at
+	row := q.db.QueryRow(ctx, `SELECT id, email, password_hash, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at
 FROM users
 WHERE id = $1`, id)
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
 	return u, err
 }
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
-	row := q.db.QueryRow(ctx, `SELECT id, email, password_hash, plan_code, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at
+	row := q.db.QueryRow(ctx, `SELECT id, email, password_hash, overlay_cidr::text, max_devices, netmap_version, relay_mode, path_mode, status, created_at
 FROM users
 WHERE email = $1`, email)
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
 	return u, err
 }
 
 func (q *Queries) GetUserBySessionTokenHash(ctx context.Context, tokenHash string) (User, error) {
-	row := q.db.QueryRow(ctx, `SELECT u.id, u.email, u.password_hash, u.plan_code, u.overlay_cidr::text, u.max_devices, u.netmap_version, u.relay_mode, u.path_mode, u.status, u.created_at
+	row := q.db.QueryRow(ctx, `SELECT u.id, u.email, u.password_hash, u.overlay_cidr::text, u.max_devices, u.netmap_version, u.relay_mode, u.path_mode, u.status, u.created_at
 FROM admin_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1
@@ -67,7 +67,7 @@ WHERE s.token_hash = $1
   AND s.expires_at > now()
   AND u.status = 'active'`, tokenHash)
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.PlanCode, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.OverlayCidr, &u.MaxDevices, &u.NetmapVersion, &u.RelayMode, &u.PathMode, &u.Status, &u.CreatedAt)
 	return u, err
 }
 
@@ -84,11 +84,6 @@ func (q *Queries) GetLastUserCIDR(ctx context.Context) (string, error) {
 
 func (q *Queries) BumpNetmapVersion(ctx context.Context, userID string) error {
 	_, err := q.db.Exec(ctx, `UPDATE users SET netmap_version = netmap_version + 1 WHERE id = $1`, userID)
-	return err
-}
-
-func (q *Queries) UpdateUserPlan(ctx context.Context, userID, planCode string) error {
-	_, err := q.db.Exec(ctx, `UPDATE users SET plan_code = $2 WHERE id = $1`, userID, planCode)
 	return err
 }
 
@@ -155,105 +150,6 @@ func (q *Queries) IncrementEmailVerificationAttempts(ctx context.Context, id str
 SET attempt_count = attempt_count + 1
 WHERE id = $1`, id)
 	return err
-}
-
-func (q *Queries) ListPlans(ctx context.Context) ([]Plan, error) {
-	rows, err := q.db.Query(ctx, `SELECT code, name, price_cents, max_devices, enable_subnet, enable_self_relay, created_at
-FROM plans
-ORDER BY price_cents ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Plan
-	for rows.Next() {
-		var p Plan
-		if err := rows.Scan(&p.Code, &p.Name, &p.PriceCents, &p.MaxDevices, &p.EnableSubnet, &p.EnableSelfRelay, &p.CreatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, p)
-	}
-	return items, rows.Err()
-}
-
-type CreateSubscriptionParams struct {
-	ID         string
-	UserID     string
-	PlanCode   string
-	Source     string
-	FreeMonths int32
-	StartsAt   time.Time
-	ExpiresAt  *time.Time
-}
-
-func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (Subscription, error) {
-	row := q.db.QueryRow(ctx, `INSERT INTO subscriptions (
-  id, user_id, plan_code, status, source, free_months, starts_at, expires_at
-) VALUES (
-  $1, $2, $3, 'active', $4, $5, $6, $7
-)
-RETURNING id, user_id, plan_code, status, source, free_months, starts_at, expires_at, created_at`,
-		arg.ID, arg.UserID, arg.PlanCode, arg.Source, arg.FreeMonths, arg.StartsAt, arg.ExpiresAt)
-	var s Subscription
-	err := row.Scan(&s.ID, &s.UserID, &s.PlanCode, &s.Status, &s.Source, &s.FreeMonths, &s.StartsAt, &s.ExpiresAt, &s.CreatedAt)
-	return s, err
-}
-
-func (q *Queries) GetActiveSubscriptionByUser(ctx context.Context, userID string) (Subscription, error) {
-	row := q.db.QueryRow(ctx, `SELECT id, user_id, plan_code, status, source, free_months, starts_at, expires_at, created_at
-FROM subscriptions
-WHERE user_id = $1
-  AND status = 'active'
-ORDER BY created_at DESC
-LIMIT 1`, userID)
-	var s Subscription
-	err := row.Scan(&s.ID, &s.UserID, &s.PlanCode, &s.Status, &s.Source, &s.FreeMonths, &s.StartsAt, &s.ExpiresAt, &s.CreatedAt)
-	return s, err
-}
-
-func (q *Queries) UpdateActiveSubscriptionPlan(ctx context.Context, id, planCode string) (Subscription, error) {
-	row := q.db.QueryRow(ctx, `UPDATE subscriptions
-SET plan_code = $2
-WHERE id = $1
-  AND status = 'active'
-RETURNING id, user_id, plan_code, status, source, free_months, starts_at, expires_at, created_at`, id, planCode)
-	var s Subscription
-	err := row.Scan(&s.ID, &s.UserID, &s.PlanCode, &s.Status, &s.Source, &s.FreeMonths, &s.StartsAt, &s.ExpiresAt, &s.CreatedAt)
-	return s, err
-}
-
-func (q *Queries) SumFreeUpgradeMonthsByUser(ctx context.Context, userID string) (int32, error) {
-	row := q.db.QueryRow(ctx, `SELECT COALESCE(sum(free_months), 0)::int
-FROM subscriptions
-WHERE user_id = $1
-  AND source = 'free_upgrade'`, userID)
-	var total int32
-	err := row.Scan(&total)
-	return total, err
-}
-
-func (q *Queries) CancelActiveSubscriptionsByUser(ctx context.Context, userID string) (int64, error) {
-	result, err := q.db.Exec(ctx, `UPDATE subscriptions
-SET status = 'canceled'
-WHERE user_id = $1
-  AND status = 'active'`, userID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-func (q *Queries) ExpireActiveSubscriptionsByUser(ctx context.Context, userID string) (int64, error) {
-	result, err := q.db.Exec(ctx, `UPDATE subscriptions
-SET status = 'expired'
-WHERE user_id = $1
-  AND status = 'active'
-  AND expires_at IS NOT NULL
-  AND expires_at <= now()`, userID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 type CreateDeviceParams struct {

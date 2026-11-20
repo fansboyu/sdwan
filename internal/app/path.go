@@ -73,9 +73,6 @@ func (s *Service) SetPathMode(ctx context.Context, user sqlc.User, mode string) 
 		return errors.New("path_mode must be direct, auto, or relay")
 	}
 	if mode != pathModeDirect {
-		if !capabilitiesForPlan(user.PlanCode).EnableSelfRelay {
-			return ErrUpgradeRequired
-		}
 		relay, err := s.store.Queries.GetActiveRelayByUser(ctx, user.ID)
 		if err != nil {
 			return errors.New("an active relay is required")

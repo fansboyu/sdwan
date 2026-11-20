@@ -38,10 +38,6 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /admin/auth/login", r.loginAdmin)
 	r.mux.HandleFunc("GET /admin/auth/me", r.me)
 	r.mux.HandleFunc("GET /admin/account", r.account)
-	r.mux.HandleFunc("GET /admin/plans", r.plans)
-	r.mux.HandleFunc("GET /admin/subscription", r.subscription)
-	r.mux.HandleFunc("POST /admin/subscription/free-upgrade", r.freeUpgrade)
-	r.mux.HandleFunc("POST /admin/subscription/cancel", r.cancelSubscription)
 	r.mux.HandleFunc("POST /admin/relays", r.createRelay)
 	r.mux.HandleFunc("POST /admin/relays/{relayID}/enable", r.enableRelay)
 	r.mux.HandleFunc("POST /admin/relays/{relayID}/disable", r.disableRelay)
@@ -165,74 +161,6 @@ func (r *Router) account(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, summary)
 }
 
-func (r *Router) plans(w http.ResponseWriter, req *http.Request) {
-	plans, err := r.svc.ListPlans(req.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"plans": plans})
-}
-
-func (r *Router) subscription(w http.ResponseWriter, req *http.Request) {
-	user, err := r.svc.AdminFromToken(req.Context(), req.Header.Get("Authorization"))
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, app.ErrUnauthorized) {
-			status = http.StatusUnauthorized
-		}
-		writeError(w, status, err)
-		return
-	}
-	summary, err := r.svc.SubscriptionSummary(req.Context(), user)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, summary)
-}
-
-func (r *Router) freeUpgrade(w http.ResponseWriter, req *http.Request) {
-	user, err := r.svc.AdminFromToken(req.Context(), req.Header.Get("Authorization"))
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, app.ErrUnauthorized) {
-			status = http.StatusUnauthorized
-		}
-		writeError(w, status, err)
-		return
-	}
-	var body app.FreeUpgradeRequest
-	if err := readJSON(req, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	summary, err := r.svc.FreeUpgrade(req.Context(), user, body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, summary)
-}
-
-func (r *Router) cancelSubscription(w http.ResponseWriter, req *http.Request) {
-	user, err := r.svc.AdminFromToken(req.Context(), req.Header.Get("Authorization"))
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, app.ErrUnauthorized) {
-			status = http.StatusUnauthorized
-		}
-		writeError(w, status, err)
-		return
-	}
-	summary, err := r.svc.CancelSubscription(req.Context(), user)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, summary)
-}
-
 func (r *Router) createRelay(w http.ResponseWriter, req *http.Request) {
 	user, err := r.svc.AdminFromToken(req.Context(), req.Header.Get("Authorization"))
 	if err != nil {
@@ -251,9 +179,6 @@ func (r *Router) createRelay(w http.ResponseWriter, req *http.Request) {
 	resp, err := r.svc.CreateRelay(req.Context(), user, body)
 	if err != nil {
 		status := http.StatusBadRequest
-		if errors.Is(err, app.ErrUpgradeRequired) {
-			status = http.StatusPaymentRequired
-		}
 		writeError(w, status, err)
 		return
 	}
@@ -273,9 +198,6 @@ func (r *Router) enableRelay(w http.ResponseWriter, req *http.Request) {
 	relay, err := r.svc.EnableRelay(req.Context(), user, req.PathValue("relayID"))
 	if err != nil {
 		status := http.StatusInternalServerError
-		if errors.Is(err, app.ErrUpgradeRequired) {
-			status = http.StatusPaymentRequired
-		}
 		writeError(w, status, err)
 		return
 	}
@@ -317,9 +239,6 @@ func (r *Router) setRelayMode(w http.ResponseWriter, req *http.Request) {
 	}
 	if err := r.svc.SetRelayMode(req.Context(), user, body.Enabled); err != nil {
 		status := http.StatusBadRequest
-		if errors.Is(err, app.ErrUpgradeRequired) {
-			status = http.StatusPaymentRequired
-		}
 		writeError(w, status, err)
 		return
 	}
@@ -341,9 +260,6 @@ func (r *Router) setPathMode(w http.ResponseWriter, req *http.Request) {
 	}
 	if err := r.svc.SetPathMode(req.Context(), user, body.Mode); err != nil {
 		status := http.StatusBadRequest
-		if errors.Is(err, app.ErrUpgradeRequired) {
-			status = http.StatusPaymentRequired
-		}
 		writeError(w, status, err)
 		return
 	}
@@ -453,8 +369,6 @@ func (r *Router) approveSubnetRoute(w http.ResponseWriter, req *http.Request) {
 		status := http.StatusInternalServerError
 		if errors.Is(err, app.ErrUnauthorized) {
 			status = http.StatusUnauthorized
-		} else if errors.Is(err, app.ErrUpgradeRequired) {
-			status = http.StatusPaymentRequired
 		}
 		writeError(w, status, err)
 		return
@@ -493,10 +407,11 @@ func (r *Router) registerDevice(w http.ResponseWriter, req *http.Request) {
 	resp, err := r.svc.RegisterDevice(req.Context(), body)
 	if err != nil {
 		status := http.StatusBadRequest
+		if errors.Is(err, app.ErrDeviceLimitReached) {
+			status = http.StatusConflict
+		}
 		if errors.Is(err, app.ErrUnauthorized) {
 			status = http.StatusUnauthorized
-		} else if errors.Is(err, app.ErrUpgradeRequired) {
-			status = http.StatusPaymentRequired
 		}
 		writeError(w, status, err)
 		return

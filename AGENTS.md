@@ -6,7 +6,7 @@ This file is for AI coding agents and human maintainers who need to understand t
 
 `sdwan` is a minimal Tailscale-like SD-WAN product.
 
-Current version: `v1.2.2`
+Current version: `v1.2.4`
 
 The project is currently an MVP with:
 
@@ -47,7 +47,6 @@ Reserved future capabilities:
 
 - `subnet_routes`
 - `relays`
-- `subscriptions`
 - `audit_logs`
 
 ## Architecture
@@ -250,7 +249,6 @@ POST /admin/auth/register
 POST /admin/auth/login
 GET  /admin/auth/me
 GET  /admin/account
-GET  /admin/plans
 GET  /admin/devices
 GET  /admin/devices/{deviceID}
 ```
@@ -358,7 +356,7 @@ cd /opt/sdwan
 git fetch --tags
 git reset --hard
 git clean -fd
-git checkout v1.2.2
+git checkout v1.2.4
 docker compose up -d --build controller web
 ```
 

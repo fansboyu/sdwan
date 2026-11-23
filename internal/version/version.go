@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	Version    = "v1.2.5"
+	Version    = "v1.2.6"
 	APIVersion = "v1"
 )
 

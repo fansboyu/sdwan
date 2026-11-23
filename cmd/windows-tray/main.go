@@ -84,7 +84,7 @@ func (a *trayApp) onReady() {
 	a.connectedItem.Disable()
 	systray.AddSeparator()
 
-	joinItem := systray.AddMenuItem("Join from Clipboard", "Copy Admin Token, then click this")
+	joinItem := systray.AddMenuItem("Join from Clipboard", "Copy a device enrollment credential, then click this")
 	connectItem := systray.AddMenuItem("Connect", "Start Windows service")
 	disconnectItem := systray.AddMenuItem("Disconnect", "Stop Windows service")
 	systray.AddSeparator()

@@ -51,6 +51,11 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /admin/subnet-routes/{routeID}/disable", r.disableSubnetRoute)
 
 	r.mux.HandleFunc("POST /api/v1/devices/register", r.registerDevice)
+	r.mux.HandleFunc("GET /admin/enrollments", r.enrollments)
+	r.mux.HandleFunc("POST /admin/enrollments", r.enrollments)
+	r.mux.HandleFunc("DELETE /admin/enrollments/{id}", r.enrollments)
+	r.mux.HandleFunc("GET /admin/lan-verifications", r.lanVerifications)
+	r.mux.HandleFunc("POST /api/v1/devices/lan-verification", r.reportLANVerification)
 	r.mux.HandleFunc("POST /api/v1/devices/poll", r.poll)
 	r.mux.HandleFunc("GET /api/v1/netmap", r.netmap)
 	r.mux.HandleFunc("GET /api/v1/relays/peers", r.relayPeers)

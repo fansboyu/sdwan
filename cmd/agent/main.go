@@ -41,6 +41,12 @@ func main() {
 		err = runSubnetGateway(os.Args[2:])
 	case "routes":
 		err = runRoutes(os.Args[2:])
+	case "verify-lan":
+		fs := flag.NewFlagSet("verify-lan", flag.ExitOnError)
+		config := fs.String("config", agent.DefaultConfigPath, "agent config path")
+		target := fs.String("target", "", "approved IPv4 TCP target, e.g. 192.168.50.10:443")
+		fs.Parse(os.Args[2:])
+		err = agent.VerifyEmployeeLAN(ctx, *config, *target)
 	case "version":
 		fmt.Println(version.Version)
 	default:
@@ -78,15 +84,22 @@ func runRegister(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("register", flag.ExitOnError)
 	configPath := fs.String("config", agent.DefaultConfigPath, "agent config path")
 	controllerURL := fs.String("controller", "https://controller.englishlisten.cn", "controller URL")
-	adminToken := fs.String("admin-token", "", "admin token used for first-time device registration")
+	adminToken := fs.String("admin-token", "", "legacy registration credential")
+	enrollmentToken := fs.String("enrollment-token", "", "one-time device enrollment credential")
 	hostname := fs.String("hostname", agent.DefaultHostname(), "device hostname")
 	listenPort := fs.Int("listen-port", agent.DefaultListenPort, "wireguard listen port")
 	advertiseRoutes := fs.String("advertise-routes", "", "comma-separated subnet routes to advertise from this device")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *enrollmentToken != "" {
+		if *adminToken != "" {
+			return fmt.Errorf("choose only one registration credential")
+		}
+		*adminToken = *enrollmentToken
+	}
 	if *adminToken == "" {
-		return fmt.Errorf("--admin-token is required")
+		return fmt.Errorf("--enrollment-token or --admin-token is required")
 	}
 	routes, err := normalizeRouteCSV(*advertiseRoutes)
 	if err != nil {

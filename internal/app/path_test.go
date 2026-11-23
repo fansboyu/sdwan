@@ -76,3 +76,31 @@ func TestResolvePathVerificationSurfacesProbeFailure(t *testing.T) {
 		t.Fatalf("unexpected result state=%q message=%q verified=%v", state, message, verified)
 	}
 }
+
+func TestPathEvidenceMustBeCurrent(t *testing.T) {
+	now := time.Now()
+	evidence := sqlc.AppliedPathStatus{Generation: 8, VerifiedAt: &now}
+	if !freshPathEvidence(evidence, 8, now) || freshPathEvidence(evidence, 7, now) || freshPathEvidence(evidence, 8, now.Add(time.Hour)) {
+		t.Fatal("only fresh evidence for the exact generation is valid")
+	}
+}
+
+func TestAutoPreparationKeepsCurrentOwner(t *testing.T) {
+	path := sqlc.PeerPath{CurrentPath: "direct", DesiredPath: "relay", State: "preparing_relay"}
+	if !directPathForAssignment("auto", path, true) {
+		t.Fatal("candidate must not own business routes before commit")
+	}
+	path.State = "switching_relay"
+	if directPathForAssignment("auto", path, true) {
+		t.Fatal("committed relay must own business routes")
+	}
+}
+
+func TestCandidateReadyRequiresGenerationAndRecentHandshake(t *testing.T) {
+	now := time.Now()
+	stat := sqlc.DevicePeerStat{LatestHandshake: &now, ReportedAt: now}
+	status := sqlc.AppliedPathStatus{Generation: 9, ReportedAt: now}
+	if !candidateSideReady(status, stat, 9, now) || candidateSideReady(status, stat, 10, now) || candidateSideReady(status, stat, 9, now.Add(time.Minute)) {
+		t.Fatal("candidate needs a current-generation acknowledgement and recent telemetry")
+	}
+}

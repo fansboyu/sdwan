@@ -1,0 +1,1 @@
+DROP TABLE employee_lan_verifications;

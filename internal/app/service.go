@@ -31,7 +31,6 @@ const (
 	globalBaseCIDR        = "100.64.0.0/10"
 	defaultRelayVirtualIP = "100.254.253.1"
 	maxNodeLimit          = 254
-	ipAllocRetries        = 3
 	endpointKeep          = 3
 
 	siteRoleClient       = "client"
@@ -430,11 +429,67 @@ type RegisterDeviceResponse struct {
 }
 
 func (s *Service) RegisterDevice(ctx context.Context, req RegisterDeviceRequest) (RegisterDeviceResponse, error) {
-	user, err := s.AdminFromToken(ctx, req.AdminToken)
+	var response RegisterDeviceResponse
+	err := s.store.WithTx(ctx, func(q *sqlc.Queries) error {
+		var id string
+		if strings.HasPrefix(strings.TrimSpace(req.AdminToken), "sdwan_enroll_") {
+			owner, err := q.ConsumeEnrollment(ctx, tokenHash(strings.TrimSpace(req.AdminToken)))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrUnauthorized
+			}
+			if err != nil {
+				return err
+			}
+			id = owner
+		} else {
+			token := strings.TrimPrefix(strings.TrimSpace(req.AdminToken), "Bearer ")
+			if token == "" {
+				return ErrUnauthorized
+			}
+			user, err := q.GetUserBySessionTokenHash(ctx, tokenHash(token))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrUnauthorized
+			}
+			if err != nil {
+				return err
+			}
+			id = user.ID
+		}
+		if err := q.LockDeviceEnrollment(ctx, id); err != nil {
+			return err
+		}
+		user, err := q.GetUser(ctx, id)
+		if err != nil {
+			return err
+		}
+		response, err = s.registerDevice(ctx, q, user, req)
+		return err
+	})
 	if err != nil {
 		return RegisterDeviceResponse{}, err
 	}
-	count, err := s.store.Queries.CountActiveDevicesByUser(ctx, user.ID)
+	return response, nil
+}
+
+func (s *Service) NewEnrollment(ctx context.Context, user string) (sqlc.Enrollment, string, error) {
+	token, err := randomToken("sdwan_enroll")
+	if err != nil {
+		return sqlc.Enrollment{}, "", err
+	}
+	item, err := s.store.Queries.CreateEnrollment(ctx, "enr_"+ksuid.New().String(), user, tokenHash(token))
+	return item, token, err
+}
+
+func (s *Service) ListEnrollments(ctx context.Context, user string) ([]sqlc.Enrollment, error) {
+	return s.store.Queries.ListEnrollments(ctx, user)
+}
+
+func (s *Service) RevokeEnrollment(ctx context.Context, user, id string) (bool, error) {
+	return s.store.Queries.RevokeEnrollment(ctx, user, id)
+}
+
+func (s *Service) registerDevice(ctx context.Context, q *sqlc.Queries, user sqlc.User, req RegisterDeviceRequest) (RegisterDeviceResponse, error) {
+	count, err := q.CountActiveDevicesByUser(ctx, user.ID)
 	if err != nil {
 		return RegisterDeviceResponse{}, err
 	}
@@ -448,8 +503,8 @@ func (s *Service) RegisterDevice(ctx context.Context, req RegisterDeviceRequest)
 	}
 
 	var device sqlc.Device
-	for attempt := 0; attempt < ipAllocRetries; attempt++ {
-		devices, err := s.store.Queries.ListDevicesByUser(ctx, user.ID)
+	{
+		devices, err := q.ListDevicesByUser(ctx, user.ID)
 		if err != nil {
 			return RegisterDeviceResponse{}, err
 		}
@@ -457,7 +512,7 @@ func (s *Service) RegisterDevice(ctx context.Context, req RegisterDeviceRequest)
 		if err != nil {
 			return RegisterDeviceResponse{}, err
 		}
-		device, err = s.store.Queries.CreateDevice(ctx, sqlc.CreateDeviceParams{
+		device, err = q.CreateDevice(ctx, sqlc.CreateDeviceParams{
 			ID:              "dev_" + ksuid.New().String(),
 			UserID:          user.ID,
 			Hostname:        defaultString(req.Hostname, "unnamed"),
@@ -469,20 +524,17 @@ func (s *Service) RegisterDevice(ctx context.Context, req RegisterDeviceRequest)
 			ClientVersion:   defaultString(req.ClientVersion, "unknown"),
 			OSVersion:       req.OSVersion,
 		})
-		if err == nil {
-			break
-		}
-		if !isDeviceVirtualIPConflict(err) {
+		if err != nil {
 			return RegisterDeviceResponse{}, err
 		}
-		if attempt == ipAllocRetries-1 {
-			return RegisterDeviceResponse{}, errors.New("virtual ip allocation conflict; please retry")
-		}
 	}
-	if err := s.store.Queries.BumpNetmapVersion(ctx, user.ID); err != nil {
+	if err := q.BumpNetmapVersion(ctx, user.ID); err != nil {
 		return RegisterDeviceResponse{}, err
 	}
-	user, _ = s.store.Queries.GetUser(ctx, user.ID)
+	user, err = q.GetUser(ctx, user.ID)
+	if err != nil {
+		return RegisterDeviceResponse{}, err
+	}
 	return RegisterDeviceResponse{
 		DeviceID:      device.ID,
 		DeviceToken:   deviceToken,
@@ -753,10 +805,10 @@ func (s *Service) Poll(ctx context.Context, token string, req PollRequest) (Poll
 		if err := s.store.Queries.BumpNetmapVersion(ctx, user.ID); err != nil {
 			return PollResponse{}, err
 		}
-		user, err = s.store.Queries.GetUser(ctx, device.UserID)
-		if err != nil {
-			return PollResponse{}, err
-		}
+	}
+	user, err = s.store.Queries.GetUser(ctx, device.UserID)
+	if err != nil {
+		return PollResponse{}, err
 	}
 	return PollResponse{
 		ServerTime:          time.Now().UTC(),
@@ -957,7 +1009,11 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 		return netmap, nil
 	}
 
-	if user.RelayMode {
+	hasHub := false
+	for _, device := range devices {
+		hasHub = hasHub || (device.Status == "active" && device.SiteRole == siteRoleMain)
+	}
+	if user.RelayMode && !hasHub && user.PathMode != pathModeRelay {
 		if relay, err := s.store.Queries.GetActiveRelayByUser(ctx, self.UserID); err == nil {
 			allowedIPs := []string{user.OverlayCidr}
 			if self.SiteRole != siteRoleMain {
@@ -996,6 +1052,10 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 	}
 
 	visibleDevices := hubAndSpokePeers(self, devices)
+	if user.PathMode == pathModeRelay {
+		// Missing assignment is not permission to fall back to direct traffic.
+		visibleDevices = nil
+	}
 	peers := make([]NetmapPeer, 0, len(visibleDevices))
 	for _, d := range visibleDevices {
 		peerEndpoints := orderedEndpointAddresses(endpointsByDevice[d.ID])
@@ -1026,8 +1086,8 @@ func (s *Service) Netmap(ctx context.Context, token string) (Netmap, error) {
 		Peers:         peers,
 		BootstrapPeer: s.bootstrapPeer(),
 		Relays:        []interface{}{},
-		PathMode:      pathModeDirect,
-		RelayPolicy:   pathModeDirect,
+		PathMode:      defaultString(user.PathMode, pathModeDirect),
+		RelayPolicy:   defaultString(user.PathMode, pathModeDirect),
 	}, nil
 }
 

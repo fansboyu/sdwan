@@ -1,11 +1,13 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { appliedGeneration, overlayStatus } from './path-status.js'
-import { ArrowLeftRight, Cable, GitFork, LayoutDashboard, Monitor, Moon, Network, Radio, RefreshCw, Settings, Sun } from '@lucide/vue'
+import { ArrowLeftRight, ClipboardList, GitFork, LayoutDashboard, Monitor, Moon, Radio, RefreshCw, Server, Settings, Sun, UserPlus } from '@lucide/vue'
+import EnterpriseWorkspace from './EnterpriseWorkspace.vue'
+import Onboarding from './Onboarding.vue'
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || ''
 const locale = ref(localStorage.getItem('locale') || 'zh')
-const theme = ref(localStorage.getItem('theme') || 'dark')
+const theme = ref(localStorage.getItem('theme') || 'light')
 const adminToken = ref(localStorage.getItem('admin_token') || '')
 const user = ref(null)
 const account = ref(null)
@@ -22,22 +24,25 @@ const relayForm = ref({ name: '', public_key: '', endpoint: '', virtual_ip: '' }
 const relayToken = ref('')
 const relayInstallCommand = 'curl -fsSL https://controller.englishlisten.cn/downloads/v1.2.2/install-relay.sh | sudo sh'
 const activeView = ref('overview')
-const showAdminToken = ref(false)
 
 const enterpriseNavigation = [
   { id: 'overview', label: '网络总览', icon: LayoutDashboard },
-  { id: 'devices', label: '设备与站点', icon: Monitor },
-  { id: 'routes', label: '子网路由', icon: GitFork },
-  { id: 'paths', label: '连接路径', icon: ArrowLeftRight },
+  { id: 'onboarding', label: '部署向导', icon: ClipboardList },
+  { id: 'routes', label: '网关与路由', icon: GitFork },
+  { id: 'services', label: '内网服务', icon: Server },
+  { id: 'devices', label: '成员设备', icon: Monitor },
+  { id: 'paths', label: '连接诊断', icon: ArrowLeftRight },
   { id: 'relays', label: 'Relay', icon: Radio },
   { id: 'settings', label: '企业设置', icon: Settings },
 ]
 
 const pageMeta = {
   overview: ['网络总览', '企业网络运行状态与关键链路'],
-  devices: ['设备与站点', '管理当前网络中的设备和主站点'],
-  routes: ['子网路由', '检查网关状态、审批 LAN 路由并查看服务探测'],
-  paths: ['连接路径', '查看直连与 Relay 候选、当前路径和切换状态'],
+  onboarding: ['部署向导', '主站点、内网路由与员工接入'],
+  devices: ['成员设备', '管理当前网络中的设备和主站点'],
+  routes: ['网关与路由', '检查网关状态、审批 LAN 路由并查看服务探测'],
+  services: ['内网服务', '查看主站点网关上报的 TCP 探测结果'],
+  paths: ['连接诊断', '查看直连与 Relay 候选、当前路径和切换状态'],
   relays: ['Relay', '管理企业自建 Relay 和账户路径模式'],
   settings: ['企业设置', '查看地址池和设备入网凭证'],
 }
@@ -520,7 +525,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main :class="user ? 'app-shell' : 'login-shell'" :data-theme="theme">
+  <main :class="user ? 'app-shell enterprise-shell' : 'login-shell'" :data-theme="user ? theme : 'dark'">
     <section class="login-page" v-if="!user">
       <div class="login-brand"><span class="brand-mark">S</span><span>SD-WAN 控制台</span></div>
       <div class="login-visual" aria-hidden="true"><span class="wave wave-one"></span><span class="wave wave-two"></span><span class="wave wave-three"></span></div>
@@ -574,7 +579,7 @@ onMounted(async () => {
       <div class="console-layout">
         <aside class="console-sidebar" aria-label="企业管理导航">
           <p class="sidebar-caption">企业工作台</p>
-          <button v-for="item in enterpriseNavigation" :key="item.id" class="console-nav-item" :class="{ active: activeView === item.id }" type="button" @click="navigate(item.id)">
+          <button v-for="item in enterpriseNavigation" :key="item.id" class="console-nav-item" :class="{ active: activeView === item.id }" :aria-current="activeView === item.id ? 'page' : undefined" type="button" @click="navigate(item.id)">
             <component :is="item.icon" class="nav-symbol" :size="19" aria-hidden="true" />{{ item.label }}
           </button>
           <div class="sidebar-network">
@@ -588,50 +593,16 @@ onMounted(async () => {
             <div><p class="page-eyebrow">{{ user.email }}</p><h1>{{ pageMeta[activeView][0] }}</h1><p class="page-description">{{ pageMeta[activeView][1] }}</p></div>
             <div class="page-heading-actions">
               <span v-if="account" class="sync-label">Netmap v{{ account.user.netmap_version }}</span>
+              <button v-if="account && (activeView === 'overview' || activeView === 'devices')" class="action-button primary enrollment-action" type="button" @click="navigate('onboarding')"><UserPlus :size="18" /> 设备接入</button>
             </div>
           </header>
 
           <p class="console-error" role="alert" v-if="error">{{ error }}</p>
 
 
-          <template v-if="account && activeView === 'overview'">
-            <div class="metric-grid">
-              <article class="metric-card"><span><Monitor :size="18" aria-hidden="true" /> 设备节点</span><strong>{{ account.device_count }} <small>/ {{ account.user.max_devices }}</small></strong><em>当前企业网络</em></article>
-              <article class="metric-card"><span><Network :size="18" aria-hidden="true" /> Overlay 地址池</span><strong class="metric-code">{{ account.user.overlay_cidr }}</strong><em>企业专属网段</em></article>
-              <article class="metric-card"><span><Cable :size="18" aria-hidden="true" /> 已批准子网</span><strong>{{ (account.subnet_routes || []).filter((route) => route.approved && route.status === 'active').length }}</strong><em>{{ (account.subnet_routes || []).length }} 条已发布</em></article>
-              <article class="metric-card"><span><Radio :size="18" aria-hidden="true" /> Relay 状态</span><strong class="metric-state" :class="account.relay_healthy ? 'good' : 'muted'">{{ account.relay_healthy ? '运行正常' : '未就绪' }}</strong><em>{{ (account.relays || []).length }} 个已配置</em></article>
-            </div>
-
-            <section class="content-section topology-section">
-              <div class="section-heading"><div><h2>企业网络拓扑</h2><p>当前版本支持一个主站点 Hub 与客户端；多分支站点模型尚未接入。</p></div><button class="text-action" type="button" @click="navigate('devices')">查看设备 <span>→</span></button></div>
-              <div class="topology-row">
-                <div class="topology-node main-node"><span class="node-icon">H</span><div><strong>主站点 Hub</strong><small>{{ account.main_site ? `${account.main_site.hostname} · ${account.main_site.virtual_ip}` : '尚未指定主站点' }}</small></div><span class="node-status" :class="account.main_site ? 'online' : 'pending'">{{ account.main_site ? '已设置' : '待设置' }}</span></div>
-                <div class="topology-link"><span>Overlay</span></div>
-                <div class="topology-node"><span class="node-icon clients">D</span><div><strong>客户端设备</strong><small>{{ Math.max(0, devices.length - (account.main_site ? 1 : 0)) }} 个设备节点</small></div><button class="text-action" type="button" @click="navigate('devices')">管理 →</button></div>
-                <div class="topology-link relay-link"><span>{{ account.user.path_mode === 'relay' ? '业务路径' : '备用路径' }}</span></div>
-                <div class="topology-node relay-node"><span class="node-icon relay">R</span><div><strong>自建 Relay</strong><small>{{ account.relay_healthy ? '健康 · 可供路径切换' : '未就绪或心跳超时' }}</small></div><span class="node-status" :class="account.relay_healthy ? 'online' : 'pending'">{{ account.relay_healthy ? '可用' : '待检查' }}</span></div>
-              </div>
-            </section>
-
-            <section class="content-section">
-              <div class="section-heading"><div><h2>连接路径</h2><p>按客户端显示 Controller 目标路径与 Agent 上报的运行状态。</p></div><button class="text-action" type="button" @click="navigate('paths')">查看诊断 <span>→</span></button></div>
-              <div class="data-table path-summary-table">
-                <div class="data-row table-head"><span>客户端</span><span>当前路径</span><span>目标路径</span><span>状态</span><span>更新时间</span></div>
-                <div class="data-row" v-for="path in (account.peer_paths || []).slice(0, 4)" :key="path.client_device_id">
-                  <span class="primary-cell">{{ deviceLabel(path.client_device_id) }}</span><span>{{ path.current_path }}</span><span>{{ path.desired_path }}</span><span><i class="status-dot" :class="path.state === 'stable' ? 'green' : 'amber'"></i>{{ path.state }}</span><span>{{ formatTime(path.updated_at) }}</span>
-                </div>
-                <div class="table-empty" v-if="!(account.peer_paths || []).length">暂无路径状态；设备完成首次同步后会显示在这里。</div>
-              </div>
-            </section>
-
-            <section class="content-section">
-              <div class="section-heading"><div><h2>子网路由概况</h2><p>审批状态与主站点 LAN 网关探测。</p></div><button class="text-action" type="button" @click="navigate('routes')">管理路由 <span>→</span></button></div>
-              <div class="route-overview-list" v-if="(account.subnet_routes || []).length">
-                <div class="route-overview-row" v-for="route in account.subnet_routes.slice(0, 3)" :key="route.id"><code>{{ route.cidr }}</code><span>{{ deviceLabel(route.device_id) }}</span><span class="route-status" :class="route.approved ? 'approved' : 'waiting'">{{ route.approved ? '已批准' : '待审批' }}</span><span>{{ subnetGatewayLabel(route) }}</span></div>
-              </div>
-              <div class="table-empty" v-else>暂未发布子网路由。</div>
-            </section>
-          </template>
+          <EnterpriseWorkspace v-if="account && (activeView === 'overview' || activeView === 'services')" :key="activeView"
+            :account="account" :devices="devices" :view="activeView" :device-label="deviceLabel" :format-time="formatTime" @navigate="navigate" />
+          <Onboarding v-if="account && activeView === 'onboarding'" :account="account" :api-base="apiBase" :headers="authHeaders()" @navigate="navigate" />
 
           <template v-if="account && activeView === 'devices'">
             <section class="content-section">
@@ -713,7 +684,7 @@ onMounted(async () => {
           <template v-if="account && activeView === 'settings'">
             <section class="content-section settings-grid">
               <div class="settings-block"><div class="section-heading"><div><h2>网络信息</h2><p>当前账号网络的基础配置。</p></div></div><dl class="detail-grid"><dt>账号</dt><dd>{{ user.email }}</dd><dt>Overlay 地址池</dt><dd><code>{{ account.user.overlay_cidr }}</code></dd><dt>设备上限</dt><dd>{{ account.user.max_devices }}</dd><dt>Netmap 版本</dt><dd>v{{ account.user.netmap_version }}</dd><dt>主站点</dt><dd>{{ account.main_site ? `${account.main_site.hostname} / ${account.main_site.virtual_ip}` : '尚未设置' }}</dd></dl></div>
-              <div class="settings-block sensitive-block"><div class="section-heading"><div><h2>设备入网凭证</h2><p>当前版本 Admin Token 仍可用于首次设备注册，请勿公开分享。</p></div><button class="text-action" type="button" @click="showAdminToken = !showAdminToken">{{ showAdminToken ? '隐藏' : '显示' }}</button></div><code class="token-value">{{ showAdminToken ? adminToken : '••••••••••••••••••••••••' }}</code><p class="muted-copy">设备注册后会获得独立 Device Token。平台仍需进一步拆分短时入网凭证和设备审批。</p></div>
+              <div class="settings-block"><div class="section-heading"><div><h2>设备入网凭证</h2><p>在部署向导中创建、查看或撤销一次性凭证。</p></div><button class="text-action" type="button" @click="navigate('onboarding')">打开部署向导</button></div></div>
             </section>
           </template>
         </section>
@@ -722,3 +693,12 @@ onMounted(async () => {
     </template>
   </main>
 </template>
+
+<style scoped>
+.enterprise-shell .enrollment-action { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.enterprise-shell .page-heading-actions { flex-wrap: wrap; }
+.enterprise-shell .console-content { min-width: 0; }
+@media (max-width: 600px) {
+  .enterprise-shell .page-heading { align-items: flex-start; flex-wrap: wrap; }
+}
+</style>

@@ -13,7 +13,7 @@ import (
 
 const overlayProbeTimeout = 2 * time.Second
 
-func AppliedPathReports(ctx context.Context, netmap Netmap) []AppliedPath {
+func AppliedPathReports(ctx context.Context, netmap Netmap, iface string) []AppliedPath {
 	assignments := netmap.PathAssignments
 	result := make([]AppliedPath, len(assignments))
 	jobs := make(chan int)
@@ -32,7 +32,11 @@ func AppliedPathReports(ctx context.Context, netmap Netmap) []AppliedPath {
 				path, err := EffectivePathForAssignment(netmap, assignment)
 				if err == nil {
 					report.EffectivePath = path
-					if err = ProbeOverlayPeer(ctx, assignment.PeerVirtualIP); err == nil {
+					err = verifyLinuxPath(ctx, netmap, assignment, iface)
+					if err == nil {
+						err = ProbeOverlayPeer(ctx, assignment.PeerVirtualIP)
+					}
+					if err == nil {
 						report.VerificationStatus = "verified"
 					} else {
 						report.VerificationError = err.Error()
@@ -50,6 +54,55 @@ func AppliedPathReports(ctx context.Context, netmap Netmap) []AppliedPath {
 	close(jobs)
 	wg.Wait()
 	return result
+}
+
+func verifyLinuxPath(ctx context.Context, netmap Netmap, assignment PathAssignment, iface string) error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	if iface == "" {
+		iface = "sdwan0"
+	}
+	target, err := netip.ParseAddr(assignment.PeerVirtualIP)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, overlayProbeTimeout)
+	defer cancel()
+	route, err := exec.CommandContext(ctx, "ip", "-4", "route", "get", target.String()).Output()
+	if err != nil || !strings.Contains(" "+strings.Join(strings.Fields(string(route)), " ")+" ", " dev "+iface+" ") {
+		return fmt.Errorf("overlay route to %s is not installed on %s", target, iface)
+	}
+	allowed, err := exec.CommandContext(ctx, "wg", "show", iface, "allowed-ips").Output()
+	if err != nil {
+		return fmt.Errorf("cannot inspect WireGuard peers on %s: %w", iface, err)
+	}
+	expected := ""
+	best := -1
+	for _, peer := range netmap.Peers {
+		for _, value := range peer.AllowedIPs {
+			if prefix, err := netip.ParsePrefix(value); err == nil && prefix.Contains(target) && prefix.Bits() > best {
+				best, expected = prefix.Bits(), peer.PublicKey
+			}
+		}
+	}
+	actual := ""
+	best = -1
+	for _, line := range strings.Split(string(allowed), "\n") {
+		fields := strings.Fields(strings.ReplaceAll(line, ",", " "))
+		if len(fields) < 2 {
+			continue
+		}
+		for _, value := range fields[1:] {
+			if prefix, err := netip.ParsePrefix(value); err == nil && prefix.Contains(target) && prefix.Bits() > best {
+				best, actual = prefix.Bits(), fields[0]
+			}
+		}
+	}
+	if expected == "" || actual != expected {
+		return fmt.Errorf("WireGuard peer owning %s does not match the current assignment", target)
+	}
+	return nil
 }
 
 func EffectivePathForAssignment(netmap Netmap, assignment PathAssignment) (string, error) {

@@ -1,0 +1,23 @@
+services:
+  lab-relay:
+    build:
+      context: .
+      dockerfile: simulation/Dockerfile
+    entrypoint: ["/bin/sh", "/lab/relay-entrypoint.sh"]
+    volumes:
+      - ./simulation/relay-entrypoint.sh:/lab/relay-entrypoint.sh:ro
+      - lab_relay_config:/etc/sdwan
+    environment:
+      LAB_ADMIN_PASSWORD: ${LAB_ADMIN_PASSWORD:-LabNetwork2026!}
+    cap_add: [NET_ADMIN]
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    networks:
+      lab:
+        ipv4_address: 10.254.10.250
+    depends_on:
+      lab-seed:
+        condition: service_completed_successfully
+
+volumes:
+  lab_relay_config:

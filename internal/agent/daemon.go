@@ -82,7 +82,7 @@ func applyNetmap(ctx context.Context, opts DaemonOptions, cfg *Config, netmap Ne
 	}
 
 	cfg.NetmapVersion = netmap.Version
-	cfg.AppliedPaths = AppliedPathReports(ctx, netmap)
+	cfg.AppliedPaths = AppliedPathReports(ctx, netmap, cfg.InterfaceName)
 	cfg.LastConfigPath = filepath.Clean(opts.WGPath)
 	return nil
 }

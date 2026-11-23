@@ -90,7 +90,7 @@ func RunSyncCycle(ctx context.Context, opts SyncCycleOptions) (time.Duration, er
 
 	if !pollResp.NetmapChanged && !opts.ForceApply && opts.IsStarted() {
 		if cfg.LastNetmap != nil {
-			cfg.AppliedPaths = AppliedPathReports(ctx, *cfg.LastNetmap)
+			cfg.AppliedPaths = AppliedPathReports(ctx, *cfg.LastNetmap, cfg.InterfaceName)
 		}
 		if err := SaveConfig(opts.ConfigPath, cfg); err != nil {
 			return interval, err
@@ -109,7 +109,7 @@ func RunSyncCycle(ctx context.Context, opts SyncCycleOptions) (time.Duration, er
 		return interval, err
 	}
 	cfg.NetmapVersion = netmap.Version
-	cfg.AppliedPaths = AppliedPathReports(ctx, netmap)
+	cfg.AppliedPaths = AppliedPathReports(ctx, netmap, cfg.InterfaceName)
 	if err := SaveConfig(opts.ConfigPath, cfg); err != nil {
 		return interval, err
 	}

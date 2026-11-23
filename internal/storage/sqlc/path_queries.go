@@ -69,8 +69,31 @@ func (q *Queries) SetPeerPathState(ctx context.Context, userID, clientID, state 
 	return err
 }
 
-func (q *Queries) CompletePeerPath(ctx context.Context, userID, clientID string) error {
-	_, err := q.db.Exec(ctx, `UPDATE peer_paths SET current_path=desired_path, state=desired_path, switched_at=now(), updated_at=now() WHERE user_id=$1 AND client_device_id=$2`, userID, clientID)
+func (q *Queries) CompletePeerPath(ctx context.Context, path PeerPath, cutoff time.Time) error {
+	_, err := q.db.Exec(ctx, `WITH completed AS (
+ UPDATE peer_paths p SET current_path=p.desired_path, state=p.desired_path, switched_at=now(), updated_at=now()
+ WHERE p.user_id=$1 AND p.client_device_id=$2 AND p.generation=$3 AND p.desired_path=$4
+ AND p.main_site_device_id=$5 AND p.current_path<>p.desired_path
+ AND 2=(SELECT count(*) FROM device_path_applied a WHERE a.client_device_id=p.client_device_id
+ AND a.device_id IN (p.client_device_id,p.main_site_device_id) AND a.generation=p.generation
+ AND a.effective_path=p.desired_path AND a.verification_status='verified' AND a.verified_at >= $6)
+ RETURNING p.user_id
+)
+UPDATE users SET netmap_version=netmap_version+1 WHERE id IN (SELECT user_id FROM completed)`,
+		path.UserID, path.ClientDeviceID, path.Generation, path.DesiredPath, path.MainSiteDeviceID, cutoff)
+	return err
+}
+
+func (q *Queries) CommitPreparedPath(ctx context.Context, path PeerPath) error {
+	_, err := q.db.Exec(ctx, `WITH committed AS (
+ UPDATE peer_paths SET state='switching_' || desired_path, generation=generation+1,
+ verification_state='pending', verification_error='', verified_at=NULL, updated_at=now()
+ WHERE user_id=$1 AND client_device_id=$2 AND main_site_device_id=$3 AND generation=$4
+ AND desired_path=$5 AND state=$6 AND current_path<>desired_path
+ RETURNING user_id
+)
+UPDATE users SET netmap_version=netmap_version+1 WHERE id IN (SELECT user_id FROM committed)`,
+		path.UserID, path.ClientDeviceID, path.MainSiteDeviceID, path.Generation, path.DesiredPath, path.State)
 	return err
 }
 
@@ -212,11 +235,13 @@ type AppliedPathStatus struct {
 	EffectivePath      string
 	VerificationStatus string
 	VerificationError  string
+	VerifiedAt         *time.Time
+	ReportedAt         time.Time
 }
 
 func (q *Queries) GetAppliedPathStatus(ctx context.Context, deviceID, clientID string) (AppliedPathStatus, error) {
 	var item AppliedPathStatus
-	err := q.db.QueryRow(ctx, `SELECT generation,effective_path,verification_status,verification_error FROM device_path_applied WHERE device_id=$1 AND client_device_id=$2`, deviceID, clientID).Scan(&item.Generation, &item.EffectivePath, &item.VerificationStatus, &item.VerificationError)
+	err := q.db.QueryRow(ctx, `SELECT generation,effective_path,verification_status,verification_error,verified_at,updated_at FROM device_path_applied WHERE device_id=$1 AND client_device_id=$2`, deviceID, clientID).Scan(&item.Generation, &item.EffectivePath, &item.VerificationStatus, &item.VerificationError, &item.VerifiedAt, &item.ReportedAt)
 	return item, err
 }
 

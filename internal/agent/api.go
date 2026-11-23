@@ -203,5 +203,8 @@ func (c *APIClient) doJSON(ctx context.Context, method, path, token string, body
 		}
 		return fmt.Errorf("%s", errPayload.Error)
 	}
+	if target == nil {
+		return nil
+	}
 	return json.NewDecoder(resp.Body).Decode(target)
 }

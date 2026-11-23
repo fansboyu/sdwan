@@ -217,6 +217,13 @@ func (s *Service) reconcilePeerPaths(ctx context.Context, user sqlc.User) (bool,
 			continue
 		}
 		directHealthy := s.pairHandshakeHealthy(ctx, client.ID, mainSite.PublicKey, mainSite.ID, client.PublicKey, pathFailureWindow)
+		if (mode == pathModeDirect || mode == pathModeRelay) && mode != path.DesiredPath {
+			if _, err := s.store.Queries.SetPeerPathDesired(ctx, user.ID, client.ID, mode, "preparing_"+mode); err != nil {
+				return false, err
+			}
+			changed = true
+			continue
+		}
 		if path.DesiredPath != path.CurrentPath {
 			if mode == pathModeAuto && path.DesiredPath == pathModeRelay &&
 				(!relayHealthy || now.Sub(path.UpdatedAt) >= 75*time.Second) {
@@ -228,12 +235,37 @@ func (s *Service) reconcilePeerPaths(ctx context.Context, user sqlc.User) (bool,
 			}
 			clientStatus, cErr := s.store.Queries.GetAppliedPathStatus(ctx, client.ID, client.ID)
 			mainStatus, mErr := s.store.Queries.GetAppliedPathStatus(ctx, mainSite.ID, client.ID)
-			state, message, verified := resolvePathVerification(path.DesiredPath, path.Generation, clientStatus, cErr, mainStatus, mErr)
+			if mode == pathModeAuto && isPathPreparing(path) && relayHealthy {
+				leftKey, rightKey := mainSite.PublicKey, client.PublicKey
+				if path.DesiredPath == pathModeRelay {
+					leftKey, rightKey = relay.PublicKey, relay.PublicKey
+				}
+				left, leftErr := s.store.Queries.GetDevicePeerStat(ctx, client.ID, leftKey)
+				right, rightErr := s.store.Queries.GetDevicePeerStat(ctx, mainSite.ID, rightKey)
+				if cErr == nil && mErr == nil && leftErr == nil && rightErr == nil &&
+					candidateSideReady(clientStatus, left, path.Generation, now) &&
+					candidateSideReady(mainStatus, right, path.Generation, now) {
+					if err := s.store.Queries.CommitPreparedPath(ctx, path); err != nil {
+						return false, err
+					}
+				} else if now.Sub(path.UpdatedAt) >= 75*time.Second {
+					if _, err := s.store.Queries.SetPeerPathDesired(ctx, user.ID, client.ID, path.CurrentPath, "candidate_not_ready"); err != nil {
+						return false, err
+					}
+					changed = true
+				}
+				continue
+			}
+			state, message, verified := resolveFreshPathVerification(path.DesiredPath, path.Generation, clientStatus, cErr, mainStatus, mErr, now)
 			if err := s.store.Queries.UpdatePeerPathVerification(ctx, user.ID, client.ID, state, path.DesiredPath, message, path.Generation, verified); err != nil {
 				return false, err
 			}
 			if verified {
-				if err := s.store.Queries.CompletePeerPath(ctx, user.ID, client.ID); err != nil {
+				if err := s.store.Queries.CompletePeerPath(ctx, path, now.Add(-pathEvidenceTTL)); err != nil {
+					return false, err
+				}
+			} else if mode == pathModeAuto && path.DesiredPath == pathModeDirect && relayHealthy && now.Sub(path.UpdatedAt) >= 75*time.Second {
+				if _, err := s.store.Queries.SetPeerPathDesired(ctx, user.ID, client.ID, pathModeRelay, "direct_recovery_failed"); err != nil {
 					return false, err
 				}
 				changed = true
@@ -242,11 +274,13 @@ func (s *Service) reconcilePeerPaths(ctx context.Context, user sqlc.User) (bool,
 		}
 		clientStatus, cErr := s.store.Queries.GetAppliedPathStatus(ctx, client.ID, client.ID)
 		mainStatus, mErr := s.store.Queries.GetAppliedPathStatus(ctx, mainSite.ID, client.ID)
-		state, message, verified := resolvePathVerification(path.CurrentPath, path.Generation, clientStatus, cErr, mainStatus, mErr)
+		state, message, verified := resolveFreshPathVerification(path.CurrentPath, path.Generation, clientStatus, cErr, mainStatus, mErr, now)
 		if err := s.store.Queries.UpdatePeerPathVerification(ctx, user.ID, client.ID, state, path.CurrentPath, message, path.Generation, verified); err != nil {
 			return false, err
 		}
-		if mode != pathModeRelay && path.CurrentPath == pathModeDirect && !verified &&
+		// Do not postpone an available fallback by restarting the failure
+		// timer for every direct Endpoint candidate.
+		if mode != pathModeRelay && (mode != pathModeAuto || !relayHealthy) && path.CurrentPath == pathModeDirect && !verified &&
 			now.Sub(path.UpdatedAt) >= pathFailureWindow && path.EndpointTrial < maxEndpointTrials {
 			if endpoints == nil {
 				items, err := s.store.Queries.ListEndpointsByUser(ctx, user.ID)
@@ -285,7 +319,7 @@ func (s *Service) reconcilePeerPaths(ctx context.Context, user sqlc.User) (bool,
 			}
 		case pathModeAuto:
 			if path.CurrentPath == pathModeDirect {
-				if directHealthy {
+				if verified || directHealthy {
 					if path.State != pathModeDirect {
 						if err := s.store.Queries.SetPeerPathState(ctx, user.ID, client.ID, pathModeDirect); err != nil {
 							return false, err
@@ -307,7 +341,7 @@ func (s *Service) reconcilePeerPaths(ctx context.Context, user sqlc.User) (bool,
 				}
 				changed = true
 			} else if now.Sub(path.SwitchedAt) >= pathRelayMinDwell {
-				if directHealthy {
+				if s.pairHandshakeHealthy(ctx, client.ID, mainSite.PublicKey, mainSite.ID, client.PublicKey, relayHandshakeTTL) {
 					if path.State != "direct_recovering" {
 						if err := s.store.Queries.SetPeerPathState(ctx, user.ID, client.ID, "direct_recovering"); err != nil {
 							return false, err
@@ -329,8 +363,35 @@ func (s *Service) reconcilePeerPaths(ctx context.Context, user sqlc.User) (bool,
 	return changed, nil
 }
 
+const pathEvidenceTTL = 45 * time.Second
+
+func candidateSideReady(status sqlc.AppliedPathStatus, stat sqlc.DevicePeerStat, generation int64, now time.Time) bool {
+	recent := func(at time.Time, ttl time.Duration) bool {
+		return !at.Before(now.Add(-ttl)) && !at.After(now)
+	}
+	return status.Generation == generation && recent(status.ReportedAt, pathEvidenceTTL) &&
+		recent(stat.ReportedAt, pathEvidenceTTL) && stat.LatestHandshake != nil && recent(*stat.LatestHandshake, relayHandshakeTTL)
+}
+
+func isPathPreparing(path sqlc.PeerPath) bool {
+	return path.CurrentPath != path.DesiredPath && path.State == "preparing_"+path.DesiredPath
+}
+
+func freshPathEvidence(status sqlc.AppliedPathStatus, generation int64, now time.Time) bool {
+	return status.Generation == generation && status.VerifiedAt != nil &&
+		!status.VerifiedAt.Before(now.Add(-pathEvidenceTTL)) && !status.VerifiedAt.After(now)
+}
+
+func resolveFreshPathVerification(desired string, generation int64, client sqlc.AppliedPathStatus, clientErr error, main sqlc.AppliedPathStatus, mainErr error, now time.Time) (string, string, bool) {
+	state, message, verified := resolvePathVerification(desired, generation, client, clientErr, main, mainErr)
+	if verified && (!freshPathEvidence(client, generation, now) || !freshPathEvidence(main, generation, now)) {
+		return "verifying", "等待两端重新验证；上次证据已过期", false
+	}
+	return state, message, verified
+}
+
 func resolvePathVerification(desired string, generation int64, client sqlc.AppliedPathStatus, clientErr error, main sqlc.AppliedPathStatus, mainErr error) (string, string, bool) {
-	if clientErr != nil || mainErr != nil || client.Generation < generation || main.Generation < generation {
+	if clientErr != nil || mainErr != nil || client.Generation != generation || main.Generation != generation {
 		return "verifying", "等待客户端和主站点应用并验证当前路径", false
 	}
 	if client.VerificationStatus == "failed" || main.VerificationStatus == "failed" {
@@ -426,7 +487,7 @@ func (s *Service) pathAwareNetmap(ctx context.Context, user sqlc.User, self sqlc
 				continue
 			}
 			relayUsable := relay != nil && relayIsHealthy(*relay)
-			active := directPathActive(mode, path.DesiredPath, relayUsable)
+			active := directPathForAssignment(mode, path, relayUsable)
 			allowed := []string{}
 			if active {
 				allowed = []string{client.VirtualIP + "/32"}
@@ -453,7 +514,7 @@ func (s *Service) pathAwareNetmap(ctx context.Context, user sqlc.User, self sqlc
 			return Netmap{}, false, nil
 		}
 		relayUsable := relay != nil && relayIsHealthy(*relay)
-		directActive := directPathActive(mode, path.DesiredPath, relayUsable)
+		directActive := directPathForAssignment(mode, path, relayUsable)
 		directAllowed := []string{}
 		businessAllowed := []string{mainSite.VirtualIP + "/32"}
 		businessAllowed = append(businessAllowed, routesByDevice[mainSite.ID]...)
@@ -503,6 +564,13 @@ func directPathActive(mode, desiredPath string, relayUsable bool) bool {
 	default:
 		return false
 	}
+}
+
+func directPathForAssignment(mode string, path sqlc.PeerPath, relayUsable bool) bool {
+	if mode == pathModeAuto && isPathPreparing(path) {
+		return directPathActive(mode, path.CurrentPath, relayUsable)
+	}
+	return directPathActive(mode, path.DesiredPath, relayUsable)
 }
 
 func relayCandidate(relay sqlc.Relay) RelayCandidate {
